@@ -179,8 +179,6 @@ class EnhancedDocumentQASystem:
             logger.error(f"Error loading {file_path}: {str(e)}")
             return []
 
-# [Previous imports and classes remain the same until the process_documents method]
-
     def process_documents(self):
         """Process all documents in the directory with batch processing."""
         logger.info("Starting initial document processing...")
@@ -305,8 +303,6 @@ class EnhancedDocumentQASystem:
                 
         except Exception as e:
             logger.error(f"Error updating document {file_path}: {str(e)}")
-
-# [Rest of the code remains the same]
 
     def _calculate_confidence(
         self,
