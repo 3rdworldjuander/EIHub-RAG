@@ -1,0 +1,6 @@
+.env
+
+
+archive/
+chroma_db/
+.venv/
