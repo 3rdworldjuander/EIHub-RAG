@@ -140,7 +140,7 @@ class EnhancedPDFLoader(PyPDFLoader):
             return []
 
 class EnhancedDocumentQASystem:
-    def __init__(self, documents_dir: str, openai_api_key: str):
+    def __init__(self, documents_dir: str, openai_api_key: str, reset_db: bool = False):
         """Initialize the Enhanced Document QA System."""
         self.documents_dir = documents_dir
         self.openai_api_key = openai_api_key
@@ -151,16 +151,33 @@ class EnhancedDocumentQASystem:
         self.vector_store = None
         self.document_metadata = {}
         self.confidence_threshold = 0.7
+        self.persist_directory = "./chroma_db"
         
         # Set SSL context for document loading
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
         ssl._create_default_https_context = ssl._create_unverified_context
+        
+        # Clean up existing DB if requested
+        if reset_db:
+            self._cleanup_database()
         
         # Process initial documents
         self.process_documents()
         
         # Initialize document watcher
         self._setup_document_watcher()
+
+    def _cleanup_database(self):
+        """Clean up the existing vector database."""
+        try:
+            import shutil
+            if os.path.exists(self.persist_directory):
+                logger.info("Cleaning up existing vector database...")
+                shutil.rmtree(self.persist_directory)
+                logger.info("Database cleanup completed.")
+        except Exception as e:
+            logger.error(f"Error cleaning up database: {str(e)}")
+
 
     def _setup_document_watcher(self):
         """Set up the document watcher for real-time updates."""
@@ -233,49 +250,72 @@ class EnhancedDocumentQASystem:
         """Process all documents in the directory with batch processing."""
         logger.info("Starting initial document processing...")
         
-        documents = []
-        for file_path in Path(self.documents_dir).rglob('*'):
-            if file_path.is_file():
-                docs = self._load_single_document(str(file_path))
-                if docs:
-                    documents.extend(docs)
-                    self.document_metadata[str(file_path)] = {
-                        "last_updated": datetime.now(),
-                        "chunks": len(docs)
-                    }
-        
-        if documents:
-            # Process documents
-            processed_docs = self._process_documents(documents)
-            
-            # Process in smaller batches
-            batch_size = 500
-            
-            # Initialize vector store with first batch
-            first_batch = processed_docs[:batch_size]
-            self.vector_store = Chroma.from_documents(
-                documents=first_batch,
-                embedding=self.embeddings,
-                persist_directory="./chroma_db"
-            )
-            
-            # Add remaining documents in batches
-            remaining_docs = processed_docs[batch_size:]
-            for i in tqdm(range(0, len(remaining_docs), batch_size), desc="Processing document batches"):
-                batch = remaining_docs[i:i + batch_size]
+        try:
+            # First try to load existing database
+            if os.path.exists(self.persist_directory) and not self.vector_store:
                 try:
-                    self.vector_store.add_documents(batch)
+                    logger.info("Attempting to load existing vector database...")
+                    self.vector_store = Chroma(
+                        embedding_function=self.embeddings,
+                        persist_directory=self.persist_directory
+                    )
+                    # Verify the database is working
+                    self.vector_store.get()
+                    logger.info("Successfully loaded existing vector database.")
                 except Exception as e:
-                    logger.error(f"Error processing batch: {str(e)}")
-                    continue
+                    logger.warning(f"Error loading existing database, will recreate: {str(e)}")
+                    self._cleanup_database()
+                    self.vector_store = None
+
+            documents = []
+            for file_path in Path(self.documents_dir).rglob('*'):
+                if file_path.is_file():
+                    docs = self._load_single_document(str(file_path))
+                    if docs:
+                        documents.extend(docs)
+                        self.document_metadata[str(file_path)] = {
+                            "last_updated": datetime.now(),
+                            "chunks": len(docs)
+                        }
             
-            logger.info(f"Processed {len(documents)} documents into {len(processed_docs)} chunks")
-        else:
-            logger.warning("No documents found to process")
-            self.vector_store = Chroma(
-                embedding_function=self.embeddings,
-                persist_directory="./chroma_db"
-            )
+            if documents:
+                # Process documents
+                processed_docs = self._process_documents(documents)
+                
+                if not self.vector_store:
+                    # Initialize new vector store
+                    logger.info("Creating new vector database...")
+                    self.vector_store = Chroma(
+                        embedding_function=self.embeddings,
+                        persist_directory=self.persist_directory
+                    )
+                
+                # Process in smaller batches
+                batch_size = 500
+                total_batches = len(processed_docs) // batch_size + (1 if len(processed_docs) % batch_size else 0)
+                
+                for i in tqdm(range(0, len(processed_docs), batch_size), 
+                            desc="Processing document batches",
+                            total=total_batches):
+                    batch = processed_docs[i:i + batch_size]
+                    try:
+                        self.vector_store.add_documents(batch)
+                    except Exception as e:
+                        logger.error(f"Error processing batch: {str(e)}")
+                        continue
+                
+                logger.info(f"Processed {len(documents)} documents into {len(processed_docs)} chunks")
+            else:
+                logger.warning("No documents found to process")
+                if not self.vector_store:
+                    self.vector_store = Chroma(
+                        embedding_function=self.embeddings,
+                        persist_directory=self.persist_directory
+                    )
+                    
+        except Exception as e:
+            logger.error(f"Error during document processing: {str(e)}")
+            raise
 
     def _process_documents(self, documents: List[Document]) -> List[Document]:
         """Process documents with enhanced chunking and metadata."""
@@ -462,7 +502,8 @@ def main():
     # Ensure the documents directory exists
     os.makedirs(docs_dir, exist_ok=True)
     
-    qa_system = EnhancedDocumentQASystem(docs_dir, openai_api_key)
+    # Initialize with reset_db=True to clean up the database
+    qa_system = EnhancedDocumentQASystem(docs_dir, openai_api_key, reset_db=True)
     
     print("\nDocument QA System initialized and ready for questions!")
     print("(Place your documents in the 'documents' directory)")
@@ -471,7 +512,7 @@ def main():
         question = input("\nEnter your question (or 'quit' to exit): ")
         if question.lower() == 'quit':
             break
-            
+        
         try:
             response = qa_system.ask_question(question)
             
