@@ -1,7 +1,7 @@
 """
 Enhanced Document QA System
 Requirements:
-pip install langchain langchain-community langchain-openai python-dotenv watchdog pandas chromadb pypdf unstructured openpyxl tqdm
+pip install langchain langchain-community langchain-openai python-dotenv watchdog pandas chromadb pypdf unstructured openpyxl tqdm certifi
 """
 
 import os
@@ -9,7 +9,10 @@ import pandas as pd
 import logging
 import threading
 import time
-from typing import List, Dict, Optional
+import ssl
+import certifi
+import warnings
+from typing import List, Dict, Optional, Any
 from pathlib import Path
 from tqdm import tqdm
 from datetime import datetime
@@ -25,6 +28,7 @@ from langchain.chains import RetrievalQA
 from langchain_core.documents import Document
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from langchain_community.vectorstores.utils import filter_complex_metadata
 
 # Configure logging
 logging.basicConfig(
@@ -32,6 +36,16 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Configure PDF warning filter
+class PDFWarningFilter(logging.Filter):
+    def filter(self, record):
+        return not (
+            "invalid pdf header" in record.getMessage().lower() or
+            "ignoring wrong pointing object" in record.getMessage().lower()
+        )
+
+logging.getLogger("pdfminer").addFilter(PDFWarningFilter())
 
 @dataclass
 class ConfidenceMetrics:
@@ -62,6 +76,24 @@ class ConfidenceMetrics:
             weights['relevance'] * self.context_relevance
         )
 
+def clean_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Clean metadata to ensure compatibility with ChromaDB."""
+    cleaned = {}
+    for key, value in metadata.items():
+        # Convert lists to strings
+        if isinstance(value, list):
+            cleaned[key] = str(value)
+        # Convert datetime objects to ISO format strings
+        elif isinstance(value, datetime):
+            cleaned[key] = value.isoformat()
+        # Keep simple types
+        elif isinstance(value, (str, int, float, bool)):
+            cleaned[key] = value
+        # Convert other types to strings
+        else:
+            cleaned[key] = str(value)
+    return cleaned
+
 class DocumentWatcher(FileSystemEventHandler):
     """Watches for document changes and triggers updates."""
     
@@ -90,6 +122,23 @@ class DocumentWatcher(FileSystemEventHandler):
         if not event.is_directory:
             self.update_queue.put(event.src_path)
 
+class EnhancedPDFLoader(PyPDFLoader):
+    """Custom PDF loader with enhanced error handling."""
+    
+    def __init__(self, file_path: str):
+        super().__init__(file_path)
+        self.file_path = file_path
+
+    def load(self) -> List[Document]:
+        """Load PDF with enhanced error handling and warning suppression."""
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                return super().load()
+        except Exception as e:
+            logger.error(f"Error loading PDF {self.file_path}: {str(e)}")
+            return []
+
 class EnhancedDocumentQASystem:
     def __init__(self, documents_dir: str, openai_api_key: str):
         """Initialize the Enhanced Document QA System."""
@@ -102,6 +151,10 @@ class EnhancedDocumentQASystem:
         self.vector_store = None
         self.document_metadata = {}
         self.confidence_threshold = 0.7
+        
+        # Set SSL context for document loading
+        self.ssl_context = ssl.create_default_context(cafile=certifi.where())
+        ssl._create_default_https_context = ssl._create_unverified_context
         
         # Process initial documents
         self.process_documents()
@@ -128,14 +181,14 @@ class EnhancedDocumentQASystem:
                 text += "Columns: " + ", ".join(sheet_df.columns) + "\n\n"
                 text += sheet_df.to_string(index=False)
                 
-                doc = {
-                    "page_content": text,
-                    "metadata": {
-                        "source": Path(file_path).name,
-                        "sheet_name": sheet_name,
-                        "date_processed": datetime.now().isoformat()
-                    }
-                }
+                doc = Document(
+                    page_content=text,
+                    metadata=clean_metadata({
+                        'source': Path(file_path).name,
+                        'sheet_name': sheet_name,
+                        'date_processed': datetime.now().isoformat()
+                    })
+                )
                 documents.append(doc)
             
             return documents
@@ -143,35 +196,32 @@ class EnhancedDocumentQASystem:
             logger.error(f"Error processing Excel file {file_path}: {str(e)}")
             return []
 
-    def _load_single_document(self, file_path: str) -> List[Dict]:
+    def _load_single_document(self, file_path: str) -> List[Document]:
         """Load a single document based on its file type."""
         try:
             file_path = Path(file_path)
             if file_path.suffix.lower() == '.pdf':
-                loader = PyPDFLoader(str(file_path))
+                loader = EnhancedPDFLoader(str(file_path))
                 docs = loader.load()
             elif file_path.suffix.lower() in ['.doc', '.docx']:
-                loader = UnstructuredWordDocumentLoader(str(file_path))
+                loader = UnstructuredWordDocumentLoader(
+                    str(file_path),
+                    mode="elements",
+                    ssl_verify=False
+                )
                 docs = loader.load()
             elif file_path.suffix.lower() in ['.xlsx', '.xls']:
                 docs = self.load_excel_as_text(str(file_path))
             else:
                 return []
             
-            # Add metadata
+            # Clean metadata for all documents
             for doc in docs:
-                if isinstance(doc, dict):
-                    if 'metadata' not in doc:
-                        doc['metadata'] = {}
-                    doc['metadata'].update({
-                        'source': file_path.name,
-                        'date_processed': datetime.now().isoformat()
-                    })
-                else:
-                    doc.metadata.update({
-                        'source': file_path.name,
-                        'date_processed': datetime.now().isoformat()
-                    })
+                doc.metadata = clean_metadata({
+                    **doc.metadata,
+                    'source': file_path.name,
+                    'date_processed': datetime.now().isoformat()
+                })
             
             return docs
             
@@ -184,7 +234,6 @@ class EnhancedDocumentQASystem:
         logger.info("Starting initial document processing...")
         
         documents = []
-        # Walk through all files in the directory
         for file_path in Path(self.documents_dir).rglob('*'):
             if file_path.is_file():
                 docs = self._load_single_document(str(file_path))
@@ -200,7 +249,7 @@ class EnhancedDocumentQASystem:
             processed_docs = self._process_documents(documents)
             
             # Process in smaller batches
-            batch_size = 500  # Reduced batch size
+            batch_size = 500
             
             # Initialize vector store with first batch
             first_batch = processed_docs[:batch_size]
@@ -223,7 +272,6 @@ class EnhancedDocumentQASystem:
             logger.info(f"Processed {len(documents)} documents into {len(processed_docs)} chunks")
         else:
             logger.warning("No documents found to process")
-            # Initialize empty vector store
             self.vector_store = Chroma(
                 embedding_function=self.embeddings,
                 persist_directory="./chroma_db"
@@ -232,8 +280,8 @@ class EnhancedDocumentQASystem:
     def _process_documents(self, documents: List[Document]) -> List[Document]:
         """Process documents with enhanced chunking and metadata."""
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,  # Reduced chunk size
-            chunk_overlap=50,  # Reduced overlap
+            chunk_size=500,
+            chunk_overlap=50,
             length_function=len,
             separators=["\n\n", "\n", ".", " ", ""],
             is_separator_regex=False
@@ -241,27 +289,22 @@ class EnhancedDocumentQASystem:
         
         processed_docs = []
         for doc in documents:
-            # Convert to Document if necessary
-            if isinstance(doc, dict):
-                doc = Document(
-                    page_content=doc['page_content'],
-                    metadata=doc['metadata']
-                )
-            
             try:
                 # Split into chunks
                 chunks = text_splitter.split_text(doc.page_content)
                 
                 # Create documents with enhanced metadata
                 for i, chunk in enumerate(chunks):
+                    metadata = clean_metadata({
+                        **doc.metadata,
+                        'chunk_id': i + 1,
+                        'total_chunks': len(chunks),
+                        'chunk_size': len(chunk)
+                    })
+                    
                     processed_docs.append(Document(
                         page_content=chunk,
-                        metadata={
-                            **doc.metadata,
-                            'chunk_id': i + 1,
-                            'total_chunks': len(chunks),
-                            'chunk_size': len(chunk)
-                        }
+                        metadata=metadata
                     ))
             except Exception as e:
                 logger.error(f"Error processing document {doc.metadata.get('source', 'unknown')}: {str(e)}")
@@ -274,16 +317,13 @@ class EnhancedDocumentQASystem:
         try:
             docs = self._load_single_document(file_path)
             if docs:
-                # Remove old document entries if they exist
                 if str(file_path) in self.document_metadata:
                     self.vector_store.delete(
                         where={"source": Path(file_path).name}
                     )
                 
-                # Process and add new document
                 processed_docs = self._process_documents(docs)
                 
-                # Add documents in smaller batches
                 batch_size = 500
                 for i in range(0, len(processed_docs), batch_size):
                     batch = processed_docs[i:i + batch_size]
@@ -293,7 +333,6 @@ class EnhancedDocumentQASystem:
                         logger.error(f"Error adding batch to vector store: {str(e)}")
                         continue
                 
-                # Update metadata
                 self.document_metadata[str(file_path)] = {
                     "last_updated": datetime.now(),
                     "chunks": len(processed_docs)
@@ -311,10 +350,8 @@ class EnhancedDocumentQASystem:
         source_docs: List[Document]
     ) -> ConfidenceMetrics:
         """Calculate confidence metrics for the response."""
-        # Basic confidence calculation based on source documents
         source_count = len(set(doc.metadata['source'] for doc in source_docs))
         
-        # Get the newest source date
         newest_date = None
         for doc in source_docs:
             if 'date_processed' in doc.metadata:
@@ -322,11 +359,10 @@ class EnhancedDocumentQASystem:
                 if newest_date is None or doc_date > newest_date:
                     newest_date = doc_date
         
-        # Simple relevance score based on source count
         relevance_score = min(1.0, source_count / 3)
         
         return ConfidenceMetrics(
-            score=0.8,  # Base confidence score
+            score=0.8,
             source_count=source_count,
             newest_source_date=newest_date,
             context_relevance=relevance_score
@@ -382,12 +418,7 @@ class EnhancedDocumentQASystem:
         )
 
     def ask_question(self, question: str) -> Dict:
-        """
-        Ask a question and get an enhanced answer with confidence metrics.
-        
-        Returns:
-            Dict containing answer, confidence metrics, and source information
-        """
+        """Ask a question and get an enhanced answer with confidence metrics."""
         if not self.vector_store:
             raise ValueError("Please process documents first")
         
