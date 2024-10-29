@@ -220,6 +220,7 @@ class EnhancedDocumentQASystem:
             if file_path.suffix.lower() == '.pdf':
                 loader = EnhancedPDFLoader(str(file_path))
                 docs = loader.load()
+                # PDF loader already includes page numbers in metadata
             elif file_path.suffix.lower() in ['.doc', '.docx']:
                 loader = UnstructuredWordDocumentLoader(
                     str(file_path),
@@ -227,8 +228,16 @@ class EnhancedDocumentQASystem:
                     ssl_verify=False
                 )
                 docs = loader.load()
+                # Add page numbers for Word documents if not present
+                for i, doc in enumerate(docs):
+                    if 'page' not in doc.metadata:
+                        doc.metadata['page'] = i + 1
             elif file_path.suffix.lower() in ['.xlsx', '.xls']:
                 docs = self.load_excel_as_text(str(file_path))
+                # Add sheet name as page reference for Excel files
+                for doc in docs:
+                    if 'page' not in doc.metadata:
+                        doc.metadata['page'] = doc.metadata.get('sheet_name', 'Sheet1')
             else:
                 return []
             
@@ -237,7 +246,8 @@ class EnhancedDocumentQASystem:
                 doc.metadata = clean_metadata({
                     **doc.metadata,
                     'source': file_path.name,
-                    'date_processed': datetime.now().isoformat()
+                    'date_processed': datetime.now().isoformat(),
+                    'page': doc.metadata.get('page', 1)  # Ensure page is always present
                 })
             
             return docs
@@ -245,6 +255,7 @@ class EnhancedDocumentQASystem:
         except Exception as e:
             logger.error(f"Error loading {file_path}: {str(e)}")
             return []
+
 
     def process_documents(self):
         """Process all documents in the directory with batch processing."""
@@ -339,7 +350,8 @@ class EnhancedDocumentQASystem:
                         **doc.metadata,
                         'chunk_id': i + 1,
                         'total_chunks': len(chunks),
-                        'chunk_size': len(chunk)
+                        'chunk_size': len(chunk),
+                        'page': doc.metadata.get('page', 1)  # Preserve page information
                     })
                     
                     processed_docs.append(Document(
@@ -472,15 +484,26 @@ class EnhancedDocumentQASystem:
             response['source_documents']
         )
         
-        # Format response
-        sources = [
-            {
-                'source': doc.metadata['source'],
-                'chunk_id': doc.metadata.get('chunk_id', 'N/A'),
-                'date_processed': doc.metadata.get('date_processed', 'N/A')
-            }
-            for doc in response['source_documents']
-        ]
+        # Format response with page numbers
+        sources = []
+        seen_sources = set()  # Track unique source/page combinations
+        
+        for doc in response['source_documents']:
+            source = doc.metadata['source']
+            page = doc.metadata.get('page', 'N/A')
+            
+            # Create a unique identifier for this source/page combination
+            source_id = f"{source}_{page}"
+            
+            # Only add if we haven't seen this exact source/page combination
+            if source_id not in seen_sources:
+                sources.append({
+                    'source': source,
+                    'page': page,
+                    'chunk_id': doc.metadata.get('chunk_id', 'N/A'),
+                    'date_processed': doc.metadata.get('date_processed', 'N/A')
+                })
+                seen_sources.add(source_id)
         
         return {
             'answer': response['result'],
@@ -488,6 +511,7 @@ class EnhancedDocumentQASystem:
             'sources': sources,
             'is_inference': confidence_metrics.overall_confidence() < self.confidence_threshold
         }
+
 
 def main():
     from dotenv import load_dotenv
@@ -524,7 +548,8 @@ def main():
             
             print("\nSources:")
             for source in response['sources']:
-                print(f"- {source['source']} (Processed: {source['date_processed']})")
+                page_ref = f"(Page: {source['page']})" if source['page'] != 'N/A' else ''
+                print(f"- {source['source']} {page_ref} (Processed: {source['date_processed']})")
                 
         except Exception as e:
             print(f"Error: {str(e)}")
