@@ -1,8 +1,8 @@
-# AI Search Bot Disclaimer
+# EI-Hub Retrieval-Augmented Generation Search Disclaimer
 
 ## Purpose and Usage
 
-This AI search bot is designed to assist in searching and retrieving information from EI-Hub and PCG documentation. It is provided as a supplementary tool to help navigate technical documentation more efficiently.
+This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation. It is provided as a supplementary tool to help navigate technical documentation more efficiently.
 
 ## Limitations and Accuracy
 

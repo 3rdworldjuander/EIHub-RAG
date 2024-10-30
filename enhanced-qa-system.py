@@ -423,7 +423,7 @@ class EnhancedDocumentQASystem:
     def create_qa_chain(self):
         """Create an enhanced question-answering chain."""
         llm = ChatOpenAI(
-            model_name="gpt-4",
+            model_name="gpt-4o",
             temperature=0,
             openai_api_key=self.openai_api_key
         )
