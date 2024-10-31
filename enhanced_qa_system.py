@@ -140,7 +140,7 @@ class EnhancedPDFLoader(PyPDFLoader):
             return []
 
 class EnhancedDocumentQASystem:
-    def __init__(self, documents_dir: str, openai_api_key: str, reset_db: bool = False):
+    def __init__(self, documents_dir: str, openai_api_key: str, reset_db: bool = False, enable_watcher: bool = True):
         """Initialize the Enhanced Document QA System."""
         self.documents_dir = documents_dir
         self.openai_api_key = openai_api_key
@@ -164,8 +164,9 @@ class EnhancedDocumentQASystem:
         # Process initial documents
         self.process_documents()
         
-        # Initialize document watcher
-        self._setup_document_watcher()
+        # Initialize document watcher only if enabled
+        if enable_watcher:
+            self._setup_document_watcher()
 
     def _cleanup_database(self):
         """Clean up the existing vector database."""
