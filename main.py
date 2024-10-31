@@ -1,587 +1,210 @@
-"""
-Enhanced Document QA System
-Requirements:
-pip install langchain langchain-community langchain-openai python-dotenv watchdog pandas chromadb pypdf unstructured openpyxl tqdm certifi
-"""
-
-import os
-import pandas as pd
-import logging
-import threading
-import time
-import ssl
-import certifi
-import warnings
-from typing import List, Dict, Optional, Any
-from pathlib import Path
-from tqdm import tqdm
-from datetime import datetime
-from queue import Queue
-from dataclasses import dataclass
-
-from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import RetrievalQA
-from langchain_core.documents import Document
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-from langchain_community.vectorstores.utils import filter_complex_metadata
-
-# FastHTML components
-from fasthtml import *
 from fasthtml.common import *
+from pathlib import Path
 import os, uvicorn
-from starlette.responses import FileResponse
-from starlette.datastructures import UploadFile
+from dotenv import load_dotenv
+import logging
+from datetime import datetime
 
-app = FastHTML(hdrs=(picolink,))
-
-
-@app.get("/")
-def home():
-    return Title("EI-Hub RAG"), Main(
-        H1("EI-Hub Retrieval-Augmented Generation Search"),
-        P("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation. It is provided as a supplementary tool to help navigate technical documentation more efficiently."),
-        Form(
-            Input(id="new-question", name="question", placeholder="Enter question"),
-            Button("Search"),
-            enctype="multipart/form-data",
-            hx_post="/respond",
-            hx_target="#result"
-        ),
-        Br(), Div(id="result"),
-        cls="container"
-    )
-
-# END FastHTML components
+# Import your existing QA system
+from enhanced_qa_system import EnhancedDocumentQASystem
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure PDF warning filter
-class PDFWarningFilter(logging.Filter):
-    def filter(self, record):
-        return not (
-            "invalid pdf header" in record.getMessage().lower() or
-            "ignoring wrong pointing object" in record.getMessage().lower()
-        )
+# Load environment variables
+load_dotenv()
 
-logging.getLogger("pdfminer").addFilter(PDFWarningFilter())
+# Initialize FastHTML app
+app = FastHTML(hdrs=(picolink,))
 
-@dataclass
-class ConfidenceMetrics:
-    """Stores confidence metrics for a response."""
-    score: float
-    source_count: int
-    newest_source_date: Optional[datetime]
-    context_relevance: float
-    
-    def overall_confidence(self) -> float:
-        """Calculate overall confidence score."""
-        weights = {
-            'score': 0.4,
-            'source_count': 0.2,
-            'recency': 0.2,
-            'relevance': 0.2
-        }
-        
-        recency_score = 1.0
-        if self.newest_source_date:
-            days_old = (datetime.now() - self.newest_source_date).days
-            recency_score = max(0.1, min(1.0, 1 - (days_old / 365)))
-            
-        return (
-            weights['score'] * self.score +
-            weights['source_count'] * min(1.0, self.source_count / 3) +
-            weights['recency'] * recency_score +
-            weights['relevance'] * self.context_relevance
-        )
+# Global variables for system state
+qa_system = None
+system_status = "initializing"
+error_message = ""
+document_count = 0
 
-def clean_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """Clean metadata to ensure compatibility with ChromaDB."""
-    cleaned = {}
-    for key, value in metadata.items():
-        # Convert lists to strings
-        if isinstance(value, list):
-            cleaned[key] = str(value)
-        # Convert datetime objects to ISO format strings
-        elif isinstance(value, datetime):
-            cleaned[key] = value.isoformat()
-        # Keep simple types
-        elif isinstance(value, (str, int, float, bool)):
-            cleaned[key] = value
-        # Convert other types to strings
-        else:
-            cleaned[key] = str(value)
-    return cleaned
-
-class DocumentWatcher(FileSystemEventHandler):
-    """Watches for document changes and triggers updates."""
-    
-    def __init__(self, qa_system):
-        self.qa_system = qa_system
-        self.update_queue = Queue()
-        self._start_update_worker()
-
-    def _start_update_worker(self):
-        def worker():
-            while True:
-                file_path = self.update_queue.get()
-                if file_path is None:
-                    break
-                self.qa_system.update_document(file_path)
-                self.update_queue.task_done()
-                
-        self.worker_thread = threading.Thread(target=worker, daemon=True)
-        self.worker_thread.start()
-
-    def on_modified(self, event):
-        if not event.is_directory:
-            self.update_queue.put(event.src_path)
-
-    def on_created(self, event):
-        if not event.is_directory:
-            self.update_queue.put(event.src_path)
-
-class EnhancedPDFLoader(PyPDFLoader):
-    """Custom PDF loader with enhanced error handling."""
-    
-    def __init__(self, file_path: str):
-        super().__init__(file_path)
-        self.file_path = file_path
-
-    def load(self) -> List[Document]:
-        """Load PDF with enhanced error handling and warning suppression."""
-        try:
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                return super().load()
-        except Exception as e:
-            logger.error(f"Error loading PDF {self.file_path}: {str(e)}")
-            return []
-
-class EnhancedDocumentQASystem:
-    def __init__(self, documents_dir: str, openai_api_key: str, reset_db: bool = False):
-        """Initialize the Enhanced Document QA System."""
-        self.documents_dir = documents_dir
-        self.openai_api_key = openai_api_key
-        self.embeddings = OpenAIEmbeddings(
-            openai_api_key=openai_api_key,
-            chunk_size=400
-        )
-        self.vector_store = None
-        self.document_metadata = {}
-        self.confidence_threshold = 0.7
-        self.persist_directory = "./chroma_db"
-        
-        # Set SSL context for document loading
-        self.ssl_context = ssl.create_default_context(cafile=certifi.where())
-        ssl._create_default_https_context = ssl._create_unverified_context
-        
-        # Clean up existing DB if requested
-        if reset_db:
-            self._cleanup_database()
-        
-        # Process initial documents
-        self.process_documents()
-        
-        # Initialize document watcher
-        self._setup_document_watcher()
-
-    def _cleanup_database(self):
-        """Clean up the existing vector database."""
-        try:
-            import shutil
-            if os.path.exists(self.persist_directory):
-                logger.info("Cleaning up existing vector database...")
-                shutil.rmtree(self.persist_directory)
-                logger.info("Database cleanup completed.")
-        except Exception as e:
-            logger.error(f"Error cleaning up database: {str(e)}")
-
-
-    def _setup_document_watcher(self):
-        """Set up the document watcher for real-time updates."""
-        self.event_handler = DocumentWatcher(self)
-        self.observer = Observer()
-        self.observer.schedule(self.event_handler, self.documents_dir, recursive=True)
-        self.observer.start()
-
-    def load_excel_as_text(self, file_path: str) -> List[Dict]:
-        """Custom loader for Excel files that converts them to text."""
-        try:
-            df = pd.read_excel(file_path, sheet_name=None)
-            documents = []
-            
-            for sheet_name, sheet_df in df.items():
-                text = f"Sheet: {sheet_name}\n\n"
-                sheet_df = sheet_df.astype(str).replace('nan', '')
-                text += "Columns: " + ", ".join(sheet_df.columns) + "\n\n"
-                text += sheet_df.to_string(index=False)
-                
-                doc = Document(
-                    page_content=text,
-                    metadata=clean_metadata({
-                        'source': Path(file_path).name,
-                        'sheet_name': sheet_name,
-                        'date_processed': datetime.now().isoformat()
-                    })
-                )
-                documents.append(doc)
-            
-            return documents
-        except Exception as e:
-            logger.error(f"Error processing Excel file {file_path}: {str(e)}")
-            return []
-
-    def _load_single_document(self, file_path: str) -> List[Document]:
-        """Load a single document based on its file type."""
-        try:
-            file_path = Path(file_path)
-            if file_path.suffix.lower() == '.pdf':
-                loader = EnhancedPDFLoader(str(file_path))
-                docs = loader.load()
-                # PDF loader already includes page numbers in metadata
-            elif file_path.suffix.lower() in ['.doc', '.docx']:
-                loader = UnstructuredWordDocumentLoader(
-                    str(file_path),
-                    mode="elements",
-                    ssl_verify=False
-                )
-                docs = loader.load()
-                # Add page numbers for Word documents if not present
-                for i, doc in enumerate(docs):
-                    if 'page' not in doc.metadata:
-                        doc.metadata['page'] = i + 1
-            elif file_path.suffix.lower() in ['.xlsx', '.xls']:
-                docs = self.load_excel_as_text(str(file_path))
-                # Add sheet name as page reference for Excel files
-                for doc in docs:
-                    if 'page' not in doc.metadata:
-                        doc.metadata['page'] = doc.metadata.get('sheet_name', 'Sheet1')
-            else:
-                return []
-            
-            # Clean metadata for all documents
-            for doc in docs:
-                doc.metadata = clean_metadata({
-                    **doc.metadata,
-                    'source': file_path.name,
-                    'date_processed': datetime.now().isoformat(),
-                    'page': doc.metadata.get('page', 1)  # Ensure page is always present
-                })
-            
-            return docs
-            
-        except Exception as e:
-            logger.error(f"Error loading {file_path}: {str(e)}")
-            return []
-
-
-    def process_documents(self):
-        """Process all documents in the directory with batch processing."""
-        logger.info("Starting initial document processing...")
-        
-        try:
-            # First try to load existing database
-            if os.path.exists(self.persist_directory) and not self.vector_store:
-                try:
-                    logger.info("Attempting to load existing vector database...")
-                    self.vector_store = Chroma(
-                        embedding_function=self.embeddings,
-                        persist_directory=self.persist_directory
-                    )
-                    # Verify the database is working
-                    self.vector_store.get()
-                    logger.info("Successfully loaded existing vector database.")
-                except Exception as e:
-                    logger.warning(f"Error loading existing database, will recreate: {str(e)}")
-                    self._cleanup_database()
-                    self.vector_store = None
-
-            documents = []
-            for file_path in Path(self.documents_dir).rglob('*'):
-                if file_path.is_file():
-                    docs = self._load_single_document(str(file_path))
-                    if docs:
-                        documents.extend(docs)
-                        self.document_metadata[str(file_path)] = {
-                            "last_updated": datetime.now(),
-                            "chunks": len(docs)
-                        }
-            
-            if documents:
-                # Process documents
-                processed_docs = self._process_documents(documents)
-                
-                if not self.vector_store:
-                    # Initialize new vector store
-                    logger.info("Creating new vector database...")
-                    self.vector_store = Chroma(
-                        embedding_function=self.embeddings,
-                        persist_directory=self.persist_directory
-                    )
-                
-                # Process in smaller batches
-                batch_size = 500
-                total_batches = len(processed_docs) // batch_size + (1 if len(processed_docs) % batch_size else 0)
-                
-                for i in tqdm(range(0, len(processed_docs), batch_size), 
-                            desc="Processing document batches",
-                            total=total_batches):
-                    batch = processed_docs[i:i + batch_size]
-                    try:
-                        self.vector_store.add_documents(batch)
-                    except Exception as e:
-                        logger.error(f"Error processing batch: {str(e)}")
-                        continue
-                
-                logger.info(f"Processed {len(documents)} documents into {len(processed_docs)} chunks")
-            else:
-                logger.warning("No documents found to process")
-                if not self.vector_store:
-                    self.vector_store = Chroma(
-                        embedding_function=self.embeddings,
-                        persist_directory=self.persist_directory
-                    )
-                    
-        except Exception as e:
-            logger.error(f"Error during document processing: {str(e)}")
-            raise
-
-    def _process_documents(self, documents: List[Document]) -> List[Document]:
-        """Process documents with enhanced chunking and metadata."""
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=50,
-            length_function=len,
-            separators=["\n\n", "\n", ".", " ", ""],
-            is_separator_regex=False
-        )
-        
-        processed_docs = []
-        for doc in documents:
-            try:
-                # Split into chunks
-                chunks = text_splitter.split_text(doc.page_content)
-                
-                # Create documents with enhanced metadata
-                for i, chunk in enumerate(chunks):
-                    metadata = clean_metadata({
-                        **doc.metadata,
-                        'chunk_id': i + 1,
-                        'total_chunks': len(chunks),
-                        'chunk_size': len(chunk),
-                        'page': doc.metadata.get('page', 1)  # Preserve page information
-                    })
-                    
-                    processed_docs.append(Document(
-                        page_content=chunk,
-                        metadata=metadata
-                    ))
-            except Exception as e:
-                logger.error(f"Error processing document {doc.metadata.get('source', 'unknown')}: {str(e)}")
-                continue
-        
-        return processed_docs
-
-    def update_document(self, file_path: str):
-        """Update a single document in the vector store."""
-        try:
-            docs = self._load_single_document(file_path)
-            if docs:
-                if str(file_path) in self.document_metadata:
-                    self.vector_store.delete(
-                        where={"source": Path(file_path).name}
-                    )
-                
-                processed_docs = self._process_documents(docs)
-                
-                batch_size = 500
-                for i in range(0, len(processed_docs), batch_size):
-                    batch = processed_docs[i:i + batch_size]
-                    try:
-                        self.vector_store.add_documents(batch)
-                    except Exception as e:
-                        logger.error(f"Error adding batch to vector store: {str(e)}")
-                        continue
-                
-                self.document_metadata[str(file_path)] = {
-                    "last_updated": datetime.now(),
-                    "chunks": len(processed_docs)
-                }
-                
-                logger.info(f"Updated document: {file_path}")
-                
-        except Exception as e:
-            logger.error(f"Error updating document {file_path}: {str(e)}")
-
-    def _calculate_confidence(
-        self,
-        question: str,
-        answer: str,
-        source_docs: List[Document]
-    ) -> ConfidenceMetrics:
-        """Calculate confidence metrics for the response."""
-        source_count = len(set(doc.metadata['source'] for doc in source_docs))
-        
-        newest_date = None
-        for doc in source_docs:
-            if 'date_processed' in doc.metadata:
-                doc_date = datetime.fromisoformat(doc.metadata['date_processed'])
-                if newest_date is None or doc_date > newest_date:
-                    newest_date = doc_date
-        
-        relevance_score = min(1.0, source_count / 3)
-        
-        return ConfidenceMetrics(
-            score=0.8,
-            source_count=source_count,
-            newest_source_date=newest_date,
-            context_relevance=relevance_score
-        )
-
-    def create_qa_chain(self):
-        """Create an enhanced question-answering chain."""
-        llm = ChatOpenAI(
-            model_name="gpt-4o",
-            temperature=0,
-            openai_api_key=self.openai_api_key
-        )
-        
-        template = """Use the following pieces of context to answer the question. 
-
-        Context: {context}
-
-        Question: {question}
-
-        Instructions:
-        1. Analyze all provided context thoroughly
-        2. If you find a direct answer, quote the relevant text and cite the source
-        3. If you can only find partial information, clearly state what information is available
-        4. If you need to make any assumptions or inferences, explicitly state them
-        5. Include confidence level and reasoning for your answer
-        6. Always cite the specific source documents used
-        
-        Format your response as follows:
-        Answer: [Your detailed answer]
-        Sources: [List of source documents used]
-        Confidence: [High/Medium/Low] - [Explanation of confidence level]
-        Assumptions (if any): [List any assumptions or inferences made]
-        
-        Answer:"""
-        
-        prompt = ChatPromptTemplate.from_template(template)
-        
-        return RetrievalQA.from_chain_type(
-            llm=llm,
-            retriever=self.vector_store.as_retriever(
-                search_type="mmr",
-                search_kwargs={
-                    "k": 6,
-                    "fetch_k": 10,
-                    "lambda_mult": 0.7
-                }
-            ),
-            chain_type_kwargs={
-                "prompt": prompt,
-                "verbose": True
-            },
-            return_source_documents=True
-        )
-
-    def ask_question(self, question: str) -> Dict:
-        """Ask a question and get an enhanced answer with confidence metrics."""
-        if not self.vector_store:
-            raise ValueError("Please process documents first")
-        
-        qa_chain = self.create_qa_chain()
-        response = qa_chain.invoke({"query": question})
-        
-        # Calculate confidence metrics
-        confidence_metrics = self._calculate_confidence(
-            question,
-            response['result'],
-            response['source_documents']
-        )
-        
-        # Format response with page numbers
-        sources = []
-        seen_sources = set()  # Track unique source/page combinations
-        
-        for doc in response['source_documents']:
-            source = doc.metadata['source']
-            page = doc.metadata.get('page', 'N/A')
-            
-            # Create a unique identifier for this source/page combination
-            source_id = f"{source}_{page}"
-            
-            # Only add if we haven't seen this exact source/page combination
-            if source_id not in seen_sources:
-                sources.append({
-                    'source': source,
-                    'page': page,
-                    'chunk_id': doc.metadata.get('chunk_id', 'N/A'),
-                    'date_processed': doc.metadata.get('date_processed', 'N/A')
-                })
-                seen_sources.add(source_id)
-        
-        return {
-            'answer': response['result'],
-            'confidence': confidence_metrics.overall_confidence(),
-            'sources': sources,
-            'is_inference': confidence_metrics.overall_confidence() < self.confidence_threshold
-        }
-
-@app.post("/respond")
-def eihubrag(question :str):
-    from dotenv import load_dotenv
-    load_dotenv()
-    
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    if not openai_api_key:
-        raise ValueError("Please set OPENAI_API_KEY in your environment variables or .env file")
-    
-    docs_dir = "documents"
-    
-    # Ensure the documents directory exists
-    os.makedirs(docs_dir, exist_ok=True)
-    
-    # Initialize with reset_db=True to clean up the database
-    qa_system = EnhancedDocumentQASystem(docs_dir, openai_api_key, reset_db=True)
-    
-    print("\nDocument QA System initialized and ready for questions!")
-    print("(Place your documents in the 'documents' directory)")
-    
-# while True:
-    # question = input("\nEnter your question (or 'quit' to exit): ")
-    # if question.lower() == 'quit':
-    #     break
+def initialize_qa_system():
+    """Initialize the QA system"""
+    global qa_system, system_status, error_message, document_count
     
     try:
+        logger.info("Starting QA system initialization...")
+        
+        # Get OpenAI API key
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
+
+        # Initialize document directory
+        docs_dir = os.getenv("DOCUMENTS_DIR", "documents")
+        os.makedirs(docs_dir, exist_ok=True)
+
+        # Initialize QA system
+        qa_system = EnhancedDocumentQASystem(
+            documents_dir=docs_dir,
+            openai_api_key=openai_api_key,
+            reset_db=False
+        )
+
+        # Update status
+        system_status = "ready"
+        document_count = len(qa_system.document_metadata)
+        logger.info("QA system initialization complete")
+
+    except Exception as e:
+        logger.error(f"Initialization error: {str(e)}")
+        error_message = str(e)
+        system_status = "error"
+
+@app.route("/")
+def index():
+    """Render the main page"""
+    return """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Document QA System</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-100">
+        <div class="container mx-auto px-4 py-8 max-w-2xl">
+            <h1 class="text-3xl font-bold mb-4">Document QA System</h1>
+            
+            <!-- Status Display -->
+            <div id="status" class="text-sm mb-4 {status_color}">
+                Status: {status}
+                {document_count_display}
+            </div>
+
+            <!-- Error Display -->
+            {error_section}
+
+            <!-- Question Form -->
+            <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+                <label class="block text-sm font-medium text-gray-700 mb-2">
+                    Your Question
+                </label>
+                <textarea
+                    id="question"
+                    class="w-full p-2 border rounded-md mb-4"
+                    rows="3"
+                    placeholder="Enter your question here..."
+                ></textarea>
+                <button
+                    id="submit"
+                    class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600"
+                    onclick="submitQuestion()"
+                >
+                    Ask Question
+                </button>
+            </div>
+
+            <!-- Answer Display -->
+            <div id="answer-section" class="bg-white rounded-lg shadow-md p-6 hidden">
+                <h2 class="text-xl font-semibold mb-4">Answer</h2>
+                <div id="answer-text" class="text-gray-700 mb-4"></div>
+                
+                <div class="mt-4">
+                    <h3 class="text-lg font-medium mb-2">Sources</h3>
+                    <div id="sources" class="text-sm text-gray-600"></div>
+                </div>
+                
+                <div id="confidence" class="text-sm text-gray-600 mt-4"></div>
+            </div>
+        </div>
+
+        <script>
+            async function submitQuestion() {
+                const questionEl = document.getElementById('question');
+                const submitBtn = document.getElementById('submit');
+                const errorEl = document.getElementById('error');
+                const answerSection = document.getElementById('answer-section');
+                
+                try {
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Processing...';
+                    if (errorEl) errorEl.classList.add('hidden');
+                    
+                    const response = await fetch('/ask', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ question: questionEl.value }),
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.error) {
+                        if (errorEl) {
+                            errorEl.textContent = data.error;
+                            errorEl.classList.remove('hidden');
+                        }
+                        return;
+                    }
+                    
+                    document.getElementById('answer-text').textContent = data.answer;
+                    document.getElementById('confidence').textContent = 
+                        `Confidence Score: ${(data.confidence * 100).toFixed(1)}%`;
+                    
+                    const sourcesHtml = data.sources.map(source => 
+                        `<div class="mb-1">• ${source.source} ${source.page !== 'N/A' ? `(Page: ${source.page})` : ''}</div>`
+                    ).join('');
+                    document.getElementById('sources').innerHTML = sourcesHtml;
+                    
+                    answerSection.classList.remove('hidden');
+                    
+                } catch (error) {
+                    if (errorEl) {
+                        errorEl.textContent = 'Error processing question: ' + error.message;
+                        errorEl.classList.remove('hidden');
+                    }
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'Ask Question';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """.format(
+        status=system_status,
+        status_color="text-green-600" if system_status == "ready" else "text-yellow-600",
+        document_count_display=f" | Documents: {document_count}" if system_status == "ready" else "",
+        error_section=f'<div id="error" class="text-red-600 text-sm mb-4">{error_message}</div>' if error_message else ""
+    )
+
+@app.route("/ask", methods=["POST"])
+def handle_question(request):
+    """Handle question submission"""
+    try:
+        question = request.json.get("question", "").strip()
+        
+        if not question:
+            return {"error": "Please enter a question"}
+
+        if not qa_system:
+            return {"error": "System not ready. Please wait..."}
+
+        # Process question
         response = qa_system.ask_question(question)
         
-        return Main(H2("\nAnswer:", response['answer']),
-                P("\nConfidence Score:", f"{response['confidence']:.2f}"),),
+        return {
+            "answer": response['answer'],
+            "confidence": response['confidence'],
+            "sources": response['sources']
+        }
         
-        # if response['is_inference']:
-        #     print("\nNote: This response includes inferences based on available information.")
-        
-        # print("\nSources:")
-        # for source in response['sources']:
-        #     page_ref = f"(Page: {source['page']})" if source['page'] != 'N/A' else ''
-        #     print(f"- {source['source']} {page_ref} (Processed: {source['date_processed']})")
-            
     except Exception as e:
-        print(f"Error: {str(e)}")
-        logger.error(f"Error processing question: {str(e)}", exc_info=True)
+        logger.error(f"Error processing question: {str(e)}")
+        return {"error": str(e)}
 
-if __name__ == "__main__": uvicorn.run("main:app", host='127.0.0.1', port=int(os.getenv("PORT", default=5000)), reload=True)
-    # main()
+if __name__ == "__main__":
+    # Initialize QA system before starting the server
+    initialize_qa_system()
+    
+    # Run the FastHTML app
+    uvicorn.run("main:app", host='127.0.0.1', port=int(os.getenv("PORT", default=5000)), reload=True)
