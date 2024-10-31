@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import queue
 from functools import partial
 from rich import print
+import json
 
 # Import your existing QA system
 from enhanced_qa_system import EnhancedDocumentQASystem
@@ -106,6 +107,59 @@ class AppState:
 # Create state instance
 state = AppState()
 
+# Response Formatting functions
+def generate_html(data):
+    # Start of HTML document
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
+    <table>
+        <tr>
+            <th>Source</th>
+            <th>Page</th>
+        </tr>
+"""
+    
+    # Add each row of data
+    for item in data:
+        html += f"""
+        <tr>
+            <td>{item['source']}</td>
+            <td>{item['page']}</td>
+        </tr>"""
+    
+    # Close the HTML document
+    html += """
+    </table>
+</body>
+</html>
+"""
+    return html
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize the QA system on startup"""
@@ -146,11 +200,27 @@ async def handle_question(question: str):
 
         # Process question asynchronously
         response = await state.process_question(question)
-        print(response)
+        # print(response)
+
+        # Create Response htmls
+        answer_raw = response['answer']
+        conf_raw = response['confidence']
+        is_inf_raw = response['is_inference']
+
+        # Create Sources table
+        source_raw = response['sources']
+        if isinstance(source_raw, str):
+            data = json.loads(source_raw)
+        else:
+            data = source_raw
+
+        source_html = generate_html(data)
+
         return Main(
             P(response['answer']),
             P("\nConfidence: ", response['confidence']),
             P("\nSources: ", response['sources']),
+            source_html
         )
         
     except Exception as e:
