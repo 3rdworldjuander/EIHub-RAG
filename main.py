@@ -107,58 +107,88 @@ class AppState:
 # Create state instance
 state = AppState()
 
-# Response Formatting functions
+#### Response Formatting functions ###
+
+# Sourcees table
 def generate_html(data):
-    # Start of HTML document
-    html = """
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin: 20px 0;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        tr:hover {
-            background-color: #f5f5f5;
-        }
-    </style>
-</head>
-<body>
-    <table>
-        <tr>
-            <th>Source</th>
-            <th>Page</th>
-        </tr>
-"""
-    
-    # Add each row of data
+    from urllib.parse import quote
+    rows = []
+
     for item in data:
-        html += f"""
-        <tr>
-            <td>{item['source']}</td>
-            <td>{item['page']}</td>
-        </tr>"""
+        print(item['source'])
+        url_tag = quote(item['source'])
+        rows.append(Tr(
+            Td(   A(item['source'], href=f"https://github.com/3rdworldjuander/EIHub-RAG/blob/main/documents/{url_tag}", target="_blank")),
+            Td(item['page'])
+        ))
+
+    table = Table(Thead(
+        Tr(Th("Document Source"), Th("Found in Page")     )),
+        Tbody(*rows),
+    cls="table table-striped table-hover")
+
+    return table
+# End of Sources table
+
+# start of answer table
+def extract_sections(response):
+    conf_raw = response['confidence']
+    answer_raw = response['answer']
+    """
+    Extracts specific sections from the response text.
+    Returns a dictionary containing the extracted sections.
+    """
+    sections = {
+        'answer': '',
+        'sources': '',
+        'confidence': '',
+        'assumptions': ''
+    }
     
-    # Close the HTML document
-    html += """
-    </table>
-</body>
-</html>
-"""
-    return html
+    # Split the text into sections
+    try:
+        # Extract Answer (everything between "Answer:" and "Sources:")
+        answer_start = answer_raw.find('Answer:') + len('Answer:')
+        sources_start = answer_raw.find('Sources:')
+        if answer_start != -1 and sources_start != -1:
+            sections['answer'] = answer_raw[answer_start:sources_start].strip()
+
+        # Extract Sources (everything between "Sources:" and "Confidence:")
+        confidence_start = answer_raw.find('Confidence:')
+        if sources_start != -1 and confidence_start != -1:
+            sections['sources'] = answer_raw[sources_start + len('Sources:'):confidence_start].strip()
+
+        # Extract Confidence (everything between "Confidence:" and "Assumptions (if any):")
+        assumptions_start = answer_raw.find('Assumptions (if any):')
+        if confidence_start != -1 and assumptions_start != -1:
+            sections['confidence'] = answer_raw[confidence_start + len('Confidence:'):assumptions_start].strip()
+
+        # Extract Assumptions (everything after "Assumptions (if any):")
+        if assumptions_start != -1:
+            sections['assumptions'] = answer_raw[assumptions_start + len('Assumptions (if any):'):].strip()
+
+    except Exception as e:
+        print(f"Error extracting sections: {e}")
+
+    rows = []
+    for section, content in sections.items():
+        rows.append(Tr(
+            Td(f"\n{section.upper()}:"), Td(content)
+        ))
+
+    rows.append(Tr(
+            Td(f"CONFIDENCE SCORE:"), Td(f"{conf_raw*100}%")
+        ))
+    
+    table = Table(Thead(
+        Tr(H2("AI Search Results") )),
+        Tbody(*rows), 
+    cls="table table-striped table-hover")
+
+    return table
+
+        
+# End of answer table
 
 @app.on_event("startup")
 async def startup_event():
@@ -203,26 +233,23 @@ async def handle_question(question: str):
         # print(response)
 
         # Create Response htmls
-        answer_raw = response['answer']
-        conf_raw = response['confidence']
+
         is_inf_raw = response['is_inference']
 
         # Create Sources table
-        source_raw = response['sources']
-        if isinstance(source_raw, str):
-            data = json.loads(source_raw)
-        else:
-            data = source_raw
+        answer_html = extract_sections(response)
+        source_html = generate_html(response['sources'])
 
-        source_html = generate_html(data)
 
         return Main(
-            P(response['answer']),
-            P("\nConfidence: ", response['confidence']),
-            P("\nSources: ", response['sources']),
-            source_html
+            answer_html,
+
+            source_html, cls='container'
         )
         
+    
+        
+
     except Exception as e:
         logger.error(f"Error processing question: {str(e)}")
         return {"error": str(e)}
