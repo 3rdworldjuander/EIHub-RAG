@@ -39,13 +39,6 @@ class AppState:
                 cls._instance.error_message = ""
                 cls._instance.document_count = 0
                 cls._instance._initialized = False
-                cls._instance.request_queue = queue.Queue()
-                cls._instance.max_concurrent_requests = int(os.getenv("MAX_CONCURRENT_REQUESTS", "5"))
-                cls._instance.request_semaphore = asyncio.Semaphore(cls._instance.max_concurrent_requests)
-                cls._instance.thread_pool = ThreadPoolExecutor(
-                    max_workers=cls._instance.max_concurrent_requests,
-                    thread_name_prefix="qa_worker"
-                )
         return cls._instance
 
     def initialize_qa_system(self):
@@ -71,7 +64,7 @@ class AppState:
                 documents_dir=docs_dir,
                 openai_api_key=openai_api_key,
                 reset_db=False,
-                enable_watcher=False
+                enable_watcher=False  # Disable the document watcher
             )
 
             # Update status
@@ -85,24 +78,6 @@ class AppState:
             self.error_message = str(e)
             self.system_status = "error"
             self._initialized = False
-
-    async def process_question(self, question: str) -> Dict:
-        """Process a question using the thread pool to prevent blocking"""
-        async with self.request_semaphore:
-            try:
-                loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(
-                    self.thread_pool,
-                    partial(self.qa_system.ask_question, question)
-                )
-            except Exception as e:
-                logger.error(f"Error processing question: {str(e)}")
-                raise
-
-    def shutdown(self):
-        """Cleanup resources"""
-        if self.thread_pool:
-            self.thread_pool.shutdown(wait=True)
 
 # Create state instance
 state = AppState()
@@ -195,21 +170,13 @@ async def startup_event():
     """Initialize the QA system on startup"""
     state.initialize_qa_system()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup resources on shutdown"""
-    state.shutdown()
-
 @app.get("/")
 def home():
-    active_requests = state.thread_pool._work_queue.qsize()
     status_color = "green" if state.system_status == "ready" else "red"
-    
     return Title("EI-Hub RAG"), Main(
         H1("EI-Hub Retrieval-Augmented Generation Search"),
         P("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
         P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
-        P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
         Form(
             Input(id="new-question", name="question", placeholder="Enter question"),
             Button("Search", disabled=state.system_status != "ready"),
@@ -222,15 +189,15 @@ def home():
     )
 
 @app.post("/respond")
-async def handle_question(question: str):
+def handle_question(question: str):
     """Handle question submission"""
     try:
         if not state.qa_system or state.system_status != "ready":
             return {"error": f"System not ready. Status: {state.system_status}. {state.error_message}"}
 
-        # Process question asynchronously
-        response = await state.process_question(question)
-
+        # Process question
+        response = state.qa_system.ask_question(question)
+        
         # Create Response htmls
 
         is_inf_raw = response['is_inference']
@@ -245,20 +212,16 @@ async def handle_question(question: str):
 
             source_html, cls='container'
         )
-        
-    
-        
-
+                
     except Exception as e:
         logger.error(f"Error processing question: {str(e)}")
         return {"error": str(e)}
 
 if __name__ == "__main__":
-    # Run with multiple workers
+    # Run the FastHTML app WITHOUT reload
     uvicorn.run(
         "main:app", 
         host='127.0.0.1', 
         port=int(os.getenv("PORT", default=5000)), 
-        reload=False,
-        workers=int(os.getenv("WORKERS", "4"))  # Number of worker processes
+        reload=False  # Disable auto-reload
     )
