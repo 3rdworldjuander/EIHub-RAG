@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+# # Questions database for storing questions and answers details
+# tables = database('data/quests.db').t
+# quests = tables.quests
+# if not quests in tables:
+#     quests.create(id=int, question=str, answer=str, pk='id')
+# Generation = quests.dataclass()
+
 # Initialize FastHTML app
 app = FastHTML(hdrs=(picolink,))
 
@@ -187,8 +194,7 @@ def extract_sections(response):
     cls="table table-striped table-hover")
 
     return table
-
-        
+ 
 # End of answer table
 
 @app.on_event("startup")
@@ -207,16 +213,16 @@ def home(session):
     status_color = "green" if state.system_status == "ready" else "red"
     if 'session_id' not in session: session['session_id'] = str(uuid.uuid4())
     inp = Input(id="new-question", name="question", placeholder="Enter a question")
-    add = Form(Group(inp, Button("Search")), hx_post="/respond", target_id='result', hx_swap="afterbegin")
-    gen_list = Div(id='result')
+    question_div = Form(Group(inp, Button("Search")), hx_post="/respond", target_id='result', hx_swap="afterbegin")
+    response_div = Div(id='result')
     return Title("EI-Hub RAG"), Main(
         H1("EI-Hub Retrieval-Augmented Generation Search"),
         P("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
         # P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
-        P(f"Session ID new: {str(session)}"),
+        P(f"Session ID: {session['session_id']}"),
         # P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
 
-        add,
+        question_div,
 
 
 
@@ -230,15 +236,16 @@ def home(session):
         Br(), 
         
         
-        gen_list,
+        response_div,
         
         # Div(id="result"),
         cls="container"
     )
 
 @app.post("/respond")
-async def handle_question(question: str):
+async def handle_question(question: str, session):
     """Handle question submission"""
+    # q = quests.insert(Generation(question=question, session=str(session)))
     try:
         if not state.qa_system or state.system_status != "ready":
             return {"error": f"System not ready. Status: {state.system_status}. {state.error_message}"}
@@ -254,12 +261,15 @@ async def handle_question(question: str):
         answer_html = extract_sections(response)
         source_html = generate_html(response['sources'])
 
-        result_display = Main(
+        answer = Main(
             answer_html,
 
-            source_html, cls='container'
+            source_html,
+             
+            P(f"Session ID: {session['session_id']}"), cls='container'
         )
-        return result_display
+
+        return answer
         
     
         
