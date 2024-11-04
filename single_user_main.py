@@ -5,13 +5,25 @@ from dotenv import load_dotenv
 import logging
 from datetime import datetime
 import threading
-import asyncio
-from typing import Optional, Dict
-from concurrent.futures import ThreadPoolExecutor
-import queue
-from functools import partial
-from rich import print
-import json
+from typing import Optional
+import signal
+import sys
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastHTML):
+    """Lifecycle manager for the FastHTML application"""
+    # Startup
+    logger.info("Application starting up...")
+    state.initialize_qa_system()
+    
+    yield
+    
+    # Shutdown
+    logger.info("Application shutting down...")
+    if state.qa_system:
+        state.qa_system.shutdown()
+    logger.info("Application shutdown complete")
 
 # Import your existing QA system
 from enhanced_qa_system import EnhancedDocumentQASystem
@@ -24,7 +36,19 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Initialize FastHTML app
-app = FastHTML(hdrs=(picolink,))
+app = FastHTML(hdrs=(picolink,), lifespan=lifespan)
+
+def signal_handler(sig, frame):
+    """Handle shutdown signals"""
+    logger.info(f"Received signal {sig}")
+    logger.info("Initiating graceful shutdown...")
+    
+    # Cleanup QA system
+    if state.qa_system:
+        state.qa_system.shutdown()
+    
+    logger.info("Shutdown complete. Exiting...")
+    sys.exit(0)
 
 class AppState:
     _instance: Optional['AppState'] = None
@@ -82,89 +106,6 @@ class AppState:
 # Create state instance
 state = AppState()
 
-#### Response Formatting functions ###
-
-# Sourcees table
-def generate_html(data):
-    from urllib.parse import quote
-    rows = []
-
-    for item in data:
-        print(item['source'])
-        url_tag = quote(item['source'])
-        rows.append(Tr(
-            Td(   A(item['source'], href=f"https://github.com/3rdworldjuander/EIHub-RAG/blob/main/documents/{url_tag}", target="_blank")),
-            Td(item['page'])
-        ))
-
-    table = Table(Thead(
-        Tr(Th("Document Source"), Th("Found in Page")     )),
-        Tbody(*rows),
-    cls="table table-striped table-hover")
-
-    return table
-# End of Sources table
-
-# start of answer table
-def extract_sections(response):
-    conf_raw = response['confidence']
-    answer_raw = response['answer']
-    """
-    Extracts specific sections from the response text.
-    Returns a dictionary containing the extracted sections.
-    """
-    sections = {
-        'answer': '',
-        'sources': '',
-        'confidence': '',
-        'assumptions': ''
-    }
-    
-    # Split the text into sections
-    try:
-        # Extract Answer (everything between "Answer:" and "Sources:")
-        answer_start = answer_raw.find('Answer:') + len('Answer:')
-        sources_start = answer_raw.find('Sources:')
-        if answer_start != -1 and sources_start != -1:
-            sections['answer'] = answer_raw[answer_start:sources_start].strip()
-
-        # Extract Sources (everything between "Sources:" and "Confidence:")
-        confidence_start = answer_raw.find('Confidence:')
-        if sources_start != -1 and confidence_start != -1:
-            sections['sources'] = answer_raw[sources_start + len('Sources:'):confidence_start].strip()
-
-        # Extract Confidence (everything between "Confidence:" and "Assumptions (if any):")
-        assumptions_start = answer_raw.find('Assumptions (if any):')
-        if confidence_start != -1 and assumptions_start != -1:
-            sections['confidence'] = answer_raw[confidence_start + len('Confidence:'):assumptions_start].strip()
-
-        # Extract Assumptions (everything after "Assumptions (if any):")
-        if assumptions_start != -1:
-            sections['assumptions'] = answer_raw[assumptions_start + len('Assumptions (if any):'):].strip()
-
-    except Exception as e:
-        print(f"Error extracting sections: {e}")
-
-    rows = []
-    for section, content in sections.items():
-        rows.append(Tr(
-            Td(f"\n{section.upper()}:"), Td(content)
-        ))
-
-    rows.append(Tr(
-            Td(f"CONFIDENCE SCORE:"), Td(f"{conf_raw*100}%")
-        ))
-    
-    table = Table(Thead(
-        Tr(H2("AI Search Results") )),
-        Tbody(*rows), 
-    cls="table table-striped table-hover")
-
-    return table
-
-        
-# End of answer table
-
 @app.on_event("startup")
 async def startup_event():
     """Initialize the QA system on startup"""
@@ -198,30 +139,33 @@ def handle_question(question: str):
         # Process question
         response = state.qa_system.ask_question(question)
         
-        # Create Response htmls
-
-        is_inf_raw = response['is_inference']
-
-        # Create Sources table
-        answer_html = extract_sections(response)
-        source_html = generate_html(response['sources'])
-
-
         return Main(
-            answer_html,
-
-            source_html, cls='container'
+            P(response['answer']),
+            P("\nConfidence: ", response['confidence']),
+            P("\nSources: ", response['sources']),
         )
-                
+        
     except Exception as e:
         logger.error(f"Error processing question: {str(e)}")
         return {"error": str(e)}
 
 if __name__ == "__main__":
-    # Run the FastHTML app WITHOUT reload
-    uvicorn.run(
-        "main:app", 
-        host='127.0.0.1', 
-        port=int(os.getenv("PORT", default=5000)), 
-        reload=False  # Disable auto-reload
-    )
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)  # Handle Ctrl+C
+    signal.signal(signal.SIGTERM, signal_handler)  # Handle termination
+    
+    # Run the FastHTML app
+    try:
+        uvicorn.run(
+            "main:app",
+            host='127.0.0.1',
+            port=int(os.getenv("PORT", default=5000)),
+            reload=False,
+            log_level="info",
+            access_log=True
+        )
+    except Exception as e:
+        logger.error(f"Application error: {str(e)}")
+        if state.qa_system:
+            state.qa_system.shutdown()
+        sys.exit(1)
