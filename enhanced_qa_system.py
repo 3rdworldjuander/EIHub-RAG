@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 import ssl
+import json
 import certifi
 import warnings
 from typing import List, Dict, Optional, Any
@@ -21,7 +22,8 @@ from dataclasses import dataclass
 
 from langchain_community.document_loaders import PyPDFLoader, UnstructuredWordDocumentLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
+# from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains import RetrievalQA
@@ -140,44 +142,83 @@ class EnhancedPDFLoader(PyPDFLoader):
             return []
 
 class EnhancedDocumentQASystem:
-    def __init__(self, documents_dir: str, openai_api_key: str, reset_db: bool = False):
+    def __init__(self, documents_dir: str, openai_api_key: str, reset_db: bool = False, enable_watcher: bool = True):
         """Initialize the Enhanced Document QA System."""
         self.documents_dir = documents_dir
         self.openai_api_key = openai_api_key
+        self.persist_directory = "./chroma_db"
         self.embeddings = OpenAIEmbeddings(
             openai_api_key=openai_api_key,
             chunk_size=400
         )
         self.vector_store = None
-        self.document_metadata = {}
+
+        # Clean up existing DB if requested
+        if reset_db:
+            logger.info("DB Reset requested")
+            self._cleanup_database()
+            self.document_metadata = {}
+        else:
+            # Load existing metadata
+            logger.info("Loading existing metadata")
+            self.document_metadata = self._load_metadata()
+
         self.confidence_threshold = 0.7
-        self.persist_directory = "./chroma_db"
-        
+
         # Set SSL context for document loading
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
         ssl._create_default_https_context = ssl._create_unverified_context
         
-        # Clean up existing DB if requested
-        if reset_db:
-            self._cleanup_database()
-        
         # Process initial documents
         self.process_documents()
         
-        # Initialize document watcher
-        self._setup_document_watcher()
+        # Initialize document watcher only if enabled
+        if enable_watcher:
+            self._setup_document_watcher()
+
+    def _save_metadata(self):
+        """Save document metadata to disk."""
+        try:
+            os.makedirs(self.persist_directory, exist_ok=True)
+            metadata_file = os.path.join(self.persist_directory, "document_metadata.json")
+            with open(metadata_file, 'w') as f:
+                # Convert datetime objects to ISO format strings for JSON serialization
+                metadata_copy = {}
+                for path, metadata in self.document_metadata.items():
+                    metadata_copy[path] = {
+                        **metadata,
+                        "last_updated": metadata["last_updated"].isoformat()
+                    }
+                json.dump(metadata_copy, f)
+        except Exception as e:
+            logger.error(f"Error saving metadata: {str(e)}")
+
+    def _load_metadata(self):
+        """Load document metadata from disk."""
+        try:
+            metadata_file = os.path.join(self.persist_directory, "document_metadata.json")
+            if os.path.exists(metadata_file):
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+                    # Convert ISO format strings back to datetime objects
+                    for path, meta in metadata.items():
+                        meta["last_updated"] = datetime.fromisoformat(meta["last_updated"])
+                    return metadata
+        except Exception as e:
+            logger.error(f"Error loading metadata: {str(e)}")
+        return {}
 
     def _cleanup_database(self):
-        """Clean up the existing vector database."""
+        """Clean up the existing vector database and metadata."""
         try:
             import shutil
             if os.path.exists(self.persist_directory):
                 logger.info("Cleaning up existing vector database...")
                 shutil.rmtree(self.persist_directory)
                 logger.info("Database cleanup completed.")
+                self.document_metadata = {}  # Reset metadata when cleaning database
         except Exception as e:
             logger.error(f"Error cleaning up database: {str(e)}")
-
 
     def _setup_document_watcher(self):
         """Set up the document watcher for real-time updates."""
@@ -256,11 +297,9 @@ class EnhancedDocumentQASystem:
             logger.error(f"Error loading {file_path}: {str(e)}")
             return []
 
-
     def process_documents(self):
         """Process all documents in the directory with batch processing."""
         logger.info("Starting initial document processing...")
-        
         try:
             # First try to load existing database
             if os.path.exists(self.persist_directory) and not self.vector_store:
@@ -273,28 +312,76 @@ class EnhancedDocumentQASystem:
                     # Verify the database is working
                     self.vector_store.get()
                     logger.info("Successfully loaded existing vector database.")
+
+                    # Process only new or modified documents
+                    documents = []
+                    for file_path in Path(self.documents_dir).rglob('*'):
+                        if not file_path.is_file():
+                            continue
+                            
+                        file_path_str = str(file_path)
+                        needs_processing = False
+                        
+                        if file_path_str in self.document_metadata:
+                            # Check if file was modified since last processing
+                            last_modified = datetime.fromtimestamp(file_path.stat().st_mtime)
+                            if last_modified > self.document_metadata[file_path_str]["last_updated"]:
+                                needs_processing = True
+                                logger.info(f"File modified: {file_path_str}")
+                        else:
+                            needs_processing = True
+                            logger.info(f"New file found: {file_path_str}")
+                        
+                        if needs_processing:
+                            docs = self._load_single_document(file_path_str)
+                            if docs:
+                                documents.extend(docs)
+                                self.document_metadata[file_path_str] = {
+                                    "last_updated": datetime.now(),
+                                    "chunks": len(docs)
+                                }
+                    
+                    if documents:
+                        logger.info(f"Found {len(documents)} new or modified documents to process")
+                    else:
+                        logger.info("No new or modified documents to process")
+                        self._save_metadata()  # Save metadata even if no changes
+                        return
+
                 except Exception as e:
                     logger.warning(f"Error loading existing database, will recreate: {str(e)}")
                     self._cleanup_database()
                     self.vector_store = None
+                    # Fall through to full document processing
+                    documents = []
+                    for file_path in Path(self.documents_dir).rglob('*'):
+                        if file_path.is_file():
+                            docs = self._load_single_document(str(file_path))
+                            if docs:
+                                documents.extend(docs)
+                                self.document_metadata[str(file_path)] = {
+                                    "last_updated": datetime.now(),
+                                    "chunks": len(docs)
+                                }
+            else:
+                # No existing database, process all documents
+                documents = []
+                for file_path in Path(self.documents_dir).rglob('*'):
+                    if file_path.is_file():
+                        docs = self._load_single_document(str(file_path))
+                        if docs:
+                            documents.extend(docs)
+                            self.document_metadata[str(file_path)] = {
+                                "last_updated": datetime.now(),
+                                "chunks": len(docs)
+                            }
 
-            documents = []
-            for file_path in Path(self.documents_dir).rglob('*'):
-                if file_path.is_file():
-                    docs = self._load_single_document(str(file_path))
-                    if docs:
-                        documents.extend(docs)
-                        self.document_metadata[str(file_path)] = {
-                            "last_updated": datetime.now(),
-                            "chunks": len(docs)
-                        }
-            
+            # Process documents if any exist or need processing
             if documents:
                 # Process documents
                 processed_docs = self._process_documents(documents)
                 
                 if not self.vector_store:
-                    # Initialize new vector store
                     logger.info("Creating new vector database...")
                     self.vector_store = Chroma(
                         embedding_function=self.embeddings,
@@ -314,7 +401,7 @@ class EnhancedDocumentQASystem:
                     except Exception as e:
                         logger.error(f"Error processing batch: {str(e)}")
                         continue
-                
+                        
                 logger.info(f"Processed {len(documents)} documents into {len(processed_docs)} chunks")
             else:
                 logger.warning("No documents found to process")
@@ -323,7 +410,10 @@ class EnhancedDocumentQASystem:
                         embedding_function=self.embeddings,
                         persist_directory=self.persist_directory
                     )
-                    
+            
+            # Save metadata after all processing is complete
+            self._save_metadata()
+            
         except Exception as e:
             logger.error(f"Error during document processing: {str(e)}")
             raise
@@ -512,7 +602,32 @@ class EnhancedDocumentQASystem:
             'is_inference': confidence_metrics.overall_confidence() < self.confidence_threshold
         }
 
-
+    def shutdown(self):
+        """Clean shutdown of the QA system"""
+        try:
+            logger.info("Initiating QA system shutdown...")
+            
+            # Stop the document watcher if it exists
+            if hasattr(self, 'observer') and self.observer.is_alive():
+                logger.info("Stopping document watcher...")
+                self.observer.stop()
+                self.observer.join()
+                logger.info("Document watcher stopped")
+            
+            # Persist and close vector store
+            if self.vector_store:
+                logger.info("Persisting vector store...")
+                if hasattr(self.vector_store, '_client'):
+                    self.vector_store._client.persist()
+                self.vector_store = None
+                logger.info("Vector store persisted")
+                
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}")
+            raise
+        finally:
+            logger.info("QA system shutdown complete")
+            
 def main():
     from dotenv import load_dotenv
     load_dotenv()
@@ -527,7 +642,7 @@ def main():
     os.makedirs(docs_dir, exist_ok=True)
     
     # Initialize with reset_db=True to clean up the database
-    qa_system = EnhancedDocumentQASystem(docs_dir, openai_api_key, reset_db=True)
+    qa_system = EnhancedDocumentQASystem(docs_dir, openai_api_key, reset_db=False)
     
     print("\nDocument QA System initialized and ready for questions!")
     print("(Place your documents in the 'documents' directory)")
