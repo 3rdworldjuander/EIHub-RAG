@@ -12,6 +12,7 @@ import queue
 from functools import partial
 from rich import print
 import json
+import uuid
 
 # Import your existing QA system
 from enhanced_qa_system import EnhancedDocumentQASystem
@@ -201,23 +202,37 @@ async def shutdown_event():
     state.shutdown()
 
 @app.get("/")
-def home():
+def home(session):
     active_requests = state.thread_pool._work_queue.qsize()
     status_color = "green" if state.system_status == "ready" else "red"
-    
+    if 'session_id' not in session: session['session_id'] = str(uuid.uuid4())
+    inp = Input(id="new-question", name="question", placeholder="Enter a question")
+    add = Form(Group(inp, Button("Search")), hx_post="/respond", target_id='result', hx_swap="afterbegin")
+    gen_list = Div(id='result')
     return Title("EI-Hub RAG"), Main(
         H1("EI-Hub Retrieval-Augmented Generation Search"),
         P("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
-        P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
-        P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
-        Form(
-            Input(id="new-question", name="question", placeholder="Enter question"),
-            Button("Search", disabled=state.system_status != "ready"),
-            enctype="multipart/form-data",
-            hx_post="/respond",
-            hx_target="#result"
-        ),
-        Br(), Div(id="result"),
+        # P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
+        P(f"Session ID new: {str(session)}"),
+        # P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
+
+        add,
+
+
+
+        # Form(
+        #     Input(id="new-question", name="question", placeholder="Enter question"),
+        #     Button("Search", disabled=state.system_status != "ready"),
+        #     enctype="multipart/form-data",
+        #     hx_post="/respond",
+        #     hx_target="#result"
+        # ),
+        Br(), 
+        
+        
+        gen_list,
+        
+        # Div(id="result"),
         cls="container"
     )
 
@@ -239,12 +254,12 @@ async def handle_question(question: str):
         answer_html = extract_sections(response)
         source_html = generate_html(response['sources'])
 
-
-        return Main(
+        result_display = Main(
             answer_html,
 
             source_html, cls='container'
         )
+        return result_display
         
     
         
