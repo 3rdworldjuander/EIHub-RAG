@@ -32,7 +32,8 @@ load_dotenv()
 # Generation = quests.dataclass()
 
 # Initialize FastHTML app
-app = FastHTML(hdrs=(picolink,))
+# app = FastHTML(hdrs=(picolink,))
+
 
 class AppState:
     _instance: Optional['AppState'] = None
@@ -196,6 +197,62 @@ def extract_sections(response):
     return table
  
 # End of answer table
+#### Response Formatting functions ###
+
+#### Website Header Information Formatting functions ###
+def FastHTML_Gallery_Standard_HDRS():
+    return (
+        # franken.Theme.blue.headers(),
+        #Script(defer=True, data_domain="gallery.fastht.ml", src="https://plausible-analytics-ce-production-dba0.up.railway.app/js/script.js"),
+        HighlightJS(langs=['python', 'javascript', 'html', 'css']),
+        MarkdownJS(),)
+
+app, rt = fast_app(hdrs=FastHTML_Gallery_Standard_HDRS())
+
+readme = """
+**Limitations:**
+- This tool is provided "as is" without any warranties, either express or implied
+- The accuracy of responses depends entirely on the source documentation provided
+- The AI may occasionally:
+   - Misinterpret questions or context
+   - Provide incomplete or inaccurate responses
+   - Generate incorrect confidence scores
+Always verify critical information against official documentation
+
+**Source Documentation**
+
+- All responses are based on available PCG and EI-Hub documentation. All the documents referred are consolidated in the documents folder of this repository.
+- The bot's knowledge is limited to the documents it has been trained on
+- Citations are provided to help users locate original source material
+- Source documentation may become outdated; users should verify against current official documentation
+
+**Best Practices**
+
+- Treat AI responses as preliminary guidance, not authoritative answers
+- Always verify critical information against official documentation
+- Use the provided confidence scores and citations to assess reliability
+- Report any inconsistencies or errors to improve the system
+
+**Liability**
+
+- This tool is for informational purposes only
+- The creators and contributors assume no responsibility for decisions made based on the bot's outputs
+- Users are solely responsible for verifying information before implementation
+- This tool is not a replacement for official support channels or documentation
+"""
+
+notice = """ *Note: This AI search bot is an independent project and is not officially affiliated with or endorsed by PCG or BEI. For official support, please use authorized support channels.* """
+
+def mk_button(show):
+    return Button("Hide" if show else "Readme",
+        get="toggle?show=" + ("False" if show else "True"),
+        hx_target="#readme", id="toggle", hx_swap_oob="outerHTML",
+        cls='uk-button uk-button-primary')
+
+
+
+#### Website Header Information Formatting functions ###
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -215,13 +272,20 @@ def home(session):
     inp = Input(id="new-question", name="question", placeholder="Enter a question")
     question_div = Form(Group(inp, Button("Search")), hx_post="/respond", target_id='result', hx_swap="afterbegin")
     response_div = Div(id='result')
+    hiding_content = Div(mk_button(False), Div(id="readme"))
     return Title("EI-Hub RAG"), Main(
         H1("EI-Hub Retrieval-Augmented Generation Search"),
-        P("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
-        # P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
-        P(f"Session ID: {session['session_id']}"),
-        # P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
+        H3("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
+        # P("Note: This AI search bot is an independent project and is not officially affiliated with or endorsed by PCG or EI-Hub. For official support, please use authorized support channels."),
+        # A("Click here to get tips for getting better results") #https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md
+        # A("Click here to know more about the project") # https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md
 
+        # P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
+        # P(f"Session ID: {session['session_id']}"),
+        # P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
+        Div(notice, cls='marked'), 
+        hiding_content,
+        Br(),
         question_div,
 
 
@@ -241,6 +305,12 @@ def home(session):
         # Div(id="result"),
         cls="container"
     )
+
+@rt('/toggle', name='toggle')
+def get(show: bool):
+    return Div(
+            Div(mk_button(show)),
+            Div(readme if show else '', cls='marked'))
 
 @app.post("/respond")
 async def handle_question(question: str, session):
