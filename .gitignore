@@ -1,5 +1,5 @@
 .env
-
+*.txt
 
 archive/
 chroma_db/

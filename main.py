@@ -256,6 +256,15 @@ def mk_button(show):
 
 #### Website Header Information Formatting functions ###
 
+### Save questions ###
+async def save_question(question: str):
+    """Save question to questions.txt file"""
+    try:
+        with open('questions.txt', 'a', encoding='utf-8') as f:
+            f.write(f"{question}\n")
+    except Exception as e:
+        logger.error(f"Error saving question to file: {str(e)}")
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -274,21 +283,22 @@ def home(session):
     if 'session_id' not in session: session['session_id'] = str(uuid.uuid4())
     inp = Input(id="new-question", name="question", placeholder="Enter a question")
     question_div = Form(Group(inp, Button("Search")), hx_post="/respond", target_id='result', hx_swap="afterbegin")
-    response_div = Div(id='result')
+    # response_div = Div(id='result')
     hiding_content = Div(mk_button(False), Div(id="readme"))
     return Title("EI-Hub RAG"), Main(
         H1("EI-Hub Retrieval-Augmented Generation Search"),
         H3("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
-        # P("Note: This AI search bot is an independent project and is not officially affiliated with or endorsed by PCG or EI-Hub. For official support, please use authorized support channels."),
+        P('Note: This AI search bot is an ', A('independent project', href="https://github.com/3rdworldjuander/EIHub-RAG", target="_blank"), 
+            ' and is not officially affiliated with or endorsed by PCG or EI-Hub. For official support, please use authorized support channels.', style="font-style: italic; padding: 2px; margin: 0;"),
 
 
         # P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
         # P(f"Session ID: {session['session_id']}"),
         # P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
-        Div(notice, cls='marked'), 
-        # Div('Click ',   A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md", target="_blank"), 'to know more about this project'),
-        # Div('See ', A('tips', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md", target="_blank"),'on using this tool, click'),
-        # Div('Training documents can be found ', A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/tree/main/documents", target="_blank")),
+        # Div(notice, cls='marked'), 
+        Div('Click ',   A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md", target="_blank"), ' to know more about this project', style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
+        Div('See ', A('tips', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md", target="_blank"),' on using this tool', style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
+        Div('Training documents the AI trained on can be found ', A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/tree/main/documents", target="_blank"), style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
         Br(),
         hiding_content,
         Br(),
@@ -306,9 +316,9 @@ def home(session):
         Br(), 
         
         
-        response_div,
+        # response_div,
         
-        # Div(id="result"),
+        Div(id="result"),
         cls="container"
     )
 
@@ -323,6 +333,9 @@ async def handle_question(question: str, session):
     """Handle question submission"""
     # q = quests.insert(Generation(question=question, session=str(session)))
     try:
+        # Save question to file
+        await save_question(question)
+
         if not state.qa_system or state.system_status != "ready":
             return {"error": f"System not ready. Status: {state.system_status}. {state.error_message}"}
 
