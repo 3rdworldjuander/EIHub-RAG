@@ -58,6 +58,7 @@ jsonpointer==3.0.0
 kubernetes==31.0.0
 langchain==0.3.4
 langchain-anthropic==0.2.3
+langchain-chroma==0.1.4
 langchain-community==0.3.3
 langchain-core==0.3.13
 langchain-openai==0.2.3
