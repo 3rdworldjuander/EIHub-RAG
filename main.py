@@ -241,7 +241,10 @@ Always verify critical information against official documentation
 - This tool is not a replacement for official support channels or documentation
 """
 
-notice = """ *Note: This AI search bot is an independent project and is not officially affiliated with or endorsed by PCG or BEI. For official support, please use authorized support channels.* """
+notice = """ *Note: This AI search bot is an independent [project](https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md) and is not officially affiliated with or endorsed by PCG or BEI. For official support, please use authorized support channels.* """
+# A("Click here to get tips for getting better results") #https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md
+# A("Click here to know more about the project") # https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md
+
 
 def mk_button(show):
     return Button("Hide" if show else "Readme",
@@ -277,13 +280,16 @@ def home(session):
         H1("EI-Hub Retrieval-Augmented Generation Search"),
         H3("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
         # P("Note: This AI search bot is an independent project and is not officially affiliated with or endorsed by PCG or EI-Hub. For official support, please use authorized support channels."),
-        # A("Click here to get tips for getting better results") #https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md
-        # A("Click here to know more about the project") # https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md
+
 
         # P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
         # P(f"Session ID: {session['session_id']}"),
         # P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
         Div(notice, cls='marked'), 
+        # Div('Click ',   A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md", target="_blank"), 'to know more about this project'),
+        # Div('See ', A('tips', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md", target="_blank"),'on using this tool, click'),
+        # Div('Training documents can be found ', A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/tree/main/documents", target="_blank")),
+        Br(),
         hiding_content,
         Br(),
         question_div,
@@ -355,5 +361,5 @@ if __name__ == "__main__":
         host='127.0.0.1', 
         port=int(os.getenv("PORT", default=5000)), 
         reload=False,
-        workers=int(os.getenv("WORKERS", "4"))  # Number of worker processes
+        workers=int(os.getenv("WORKERS", "1"))  # Number of worker processes
     )
