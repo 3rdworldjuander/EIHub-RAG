@@ -34,7 +34,6 @@ load_dotenv()
 # Initialize FastHTML app
 # app = FastHTML(hdrs=(picolink,))
 
-
 class AppState:
     _instance: Optional['AppState'] = None
     _lock = threading.Lock()
@@ -118,7 +117,7 @@ state = AppState()
 
 #### Response Formatting functions ###
 
-# Sources table
+# Start of Sources table
 def generate_html(data):
     from urllib.parse import quote
     rows = []
@@ -139,7 +138,7 @@ def generate_html(data):
     return table
 # End of Sources table
 
-# start of answer table
+# Start of Answer table
 def extract_sections(response):
     conf_raw = response['confidence']
     answer_raw = response['answer']
@@ -196,7 +195,7 @@ def extract_sections(response):
 
     return table
 
-# End of answer table
+# End of Answer table
 
 #### Response Formatting functions ###
 
@@ -209,7 +208,7 @@ def FastHTML_Gallery_Standard_HDRS():
         MarkdownJS(), 
         Script('''
                function showProgressMessage() {
-                    document.getElementById('progress_bar').innerHTML = "Searching... Please wait";
+                    document.getElementById('progress_bar').innerHTML = "Searching... Please wait";           
                 }
                 ''')
             )
@@ -249,8 +248,6 @@ Always verify critical information against official documentation
 """
 
 notice = """ *Note: This AI search bot is an independent [project](https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md) and is not officially affiliated with or endorsed by PCG or BEI. For official support, please use authorized support channels.* """
-# A("Click here to get tips for getting better results") #https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md
-# A("Click here to know more about the project") # https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md
 
 
 def mk_button(show):
@@ -290,42 +287,36 @@ def home(session):
     if 'session_id' not in session: session['session_id'] = str(uuid.uuid4())
     inp = Input(id="new-question", name="question", placeholder="Enter a question")
     question_div = Form(Group(inp, Button("Search",
-                                          hx_post="/respond", hx_target="#progress_bar, #result", hx_swap="afterbegin", onclick="showProgressMessage()"
+                                          hx_post="/respond", 
+                                          hx_target="#progress_bar, #result", 
+                                          hx_swap="afterbegin", 
+                                          onclick="showProgressMessage()"
                                           )), )
     # response_div = Div(id='result')
-    hiding_content = Div(mk_button(False), Div(id="readme"))
-    return Title("EI-Hub RAG"), Main(
+    hiding_content = Div(mk_button(False), Div(id="readme"),style="font-size: 0.8em; margin: 0;")
+    return Title("EI-Hub RAG"), Titled(
         H1("EI-Hub Retrieval-Augmented Generation Search"),
         H3("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
-        P('Note: This AI search bot is an ', A('independent project', href="https://github.com/3rdworldjuander/EIHub-RAG", target="_blank"), 
-            ' and is not officially affiliated with or endorsed by PCG or EI-Hub. For official support, please use authorized support channels.', style="font-style: italic; padding: 2px; margin: 0;"),
-
-
-        # P(f"System Status: ", Span(state.system_status, style=f"color: {status_color}")),
-        # P(f"Session ID: {session['session_id']}"),
-        # P(f"Active Requests: {active_requests}/{state.max_concurrent_requests}"),
-        # Div(notice, cls='marked'), 
-        Div('Click ',   A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md", target="_blank"), ' to know more about this project', style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
-        Div('See ', A('tips', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md", target="_blank"),' on using this tool', style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
-        Div('Training documents the AI trained on can be found ', A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/tree/main/documents", target="_blank"), style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
+        P('Note: This AI search bot is an ', 
+          A('independent project', href="https://github.com/3rdworldjuander/EIHub-RAG", target="_blank"), 
+            ' and is not officially affiliated with or endorsed by PCG or EI-Hub. For official support, please use authorized support channels.', 
+            style="font-style: italic; padding: 2px; margin: 0;"),
+        Div('Click ',   
+            A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/README.md", target="_blank"), 
+            ' to know more about this project', 
+            style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
+        Div('See ', 
+            A('tips', href="https://github.com/3rdworldjuander/EIHub-RAG/blob/main/TIPS.md", target="_blank"),
+            ' on using this tool', 
+            style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
+        Div('Training documents the AI trained on can be found ', 
+            A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/tree/main/documents", target="_blank"), 
+            style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
         Br(),
         hiding_content,
         Br(),
         question_div,
-
-
-
-        # Form(
-        #     Input(id="new-question", name="question", placeholder="Enter question"),
-        #     Button("Search", disabled=state.system_status != "ready"),
-        #     enctype="multipart/form-data",
-        #     hx_post="/respond",
-        #     hx_target="#result"
-        # ),
         Br(), 
-        
-        
-        # response_div,
         Div(id="progress_bar"),
         Div(id="result"),
         cls="container"
@@ -340,7 +331,6 @@ def get(show: bool):
 @app.post("/respond")
 async def handle_question(question: str, session):
     """Handle question submission"""
-    # q = quests.insert(Generation(question=question, session=str(session)))
     try:
         # Save question to file
         await save_question(question)
@@ -348,32 +338,40 @@ async def handle_question(question: str, session):
         if not state.qa_system or state.system_status != "ready":
             return {"error": f"System not ready. Status: {state.system_status}. {state.error_message}"}
 
-        # Process question asynchronously
-        response = await state.process_question(question)
+        # ### PRODUCTION ###
 
-        # Create Response htmls
+        # # Process question asynchronously
+        # response = await state.process_question(question)
 
-        is_inf_raw = response['is_inference']
+        # # Create Response htmls
 
-        # Create Sources table
-        answer_html = extract_sections(response)
-        source_html = generate_html(response['sources'])
+        # is_inf_raw = response['is_inference']
 
-        answer = Main(
-            answer_html,
+        # # Create Sources table
+        # answer_html = extract_sections(response)
+        # source_html = generate_html(response['sources'])
 
-            source_html,
+        # answer = Main(
+        #     answer_html,
+
+        #     source_html,
              
-            P(f"Session ID: {session['session_id']}"), cls='container'
-        )
+        #     P(f"Session ID: {session['session_id']}"), cls='container'
+        # )
 
-        prog_update = Div()
+        # prog_update = Div()
+
+        # ### /PRODUCTION ###
+
+        ### DUMMY ###
+        await asyncio.sleep(8) 
+
+        answer = "Lorem Ipsum"
+        prog_update = " "
+        ### /DUMMY ###
 
         return answer, prog_update
         
-    
-        
-
     except Exception as e:
         logger.error(f"Error processing question: {str(e)}")
         return {"error": str(e)}

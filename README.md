@@ -31,7 +31,7 @@ This RAG search is designed to assist in searching and retrieving information fr
 ## Liability
 
 - This tool is for informational purposes only
-- The creators and contributors assume no responsibility for decisions made based on the bot's outputs
+- The creator assumes no responsibility for decisions made based on the bot's outputs
 - Users are solely responsible for verifying information before implementation
 - This tool is not a replacement for official support channels or documentation
 
@@ -45,7 +45,7 @@ This RAG search is designed to assist in searching and retrieving information fr
 
 ## Feedback and Improvements
 
-We welcome feedback to improve the accuracy and usefulness of this tool. Please submit issues or suggestions through the repository's issue tracker.
+Feedback is welcome to improve the accuracy and usefulness of this tool. Please submit issues or suggestions through the repository's issue tracker.
 
 ---
 *Note: This AI search bot is an independent project and is not officially affiliated with or endorsed by PCG or EI-Hub. For official support, please use authorized support channels.*
