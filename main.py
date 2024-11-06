@@ -118,7 +118,7 @@ state = AppState()
 
 #### Response Formatting functions ###
 
-# Sourcees table
+# Sources table
 def generate_html(data):
     from urllib.parse import quote
     rows = []
@@ -195,8 +195,9 @@ def extract_sections(response):
     cls="table table-striped table-hover")
 
     return table
- 
+
 # End of answer table
+
 #### Response Formatting functions ###
 
 #### Website Header Information Formatting functions ###
@@ -205,7 +206,13 @@ def FastHTML_Gallery_Standard_HDRS():
         # franken.Theme.blue.headers(),
         #Script(defer=True, data_domain="gallery.fastht.ml", src="https://plausible-analytics-ce-production-dba0.up.railway.app/js/script.js"),
         HighlightJS(langs=['python', 'javascript', 'html', 'css']),
-        MarkdownJS(),)
+        MarkdownJS(), 
+        Script('''
+               function showProgressMessage() {
+                    document.getElementById('progress_bar').innerHTML = "Searching... Please wait";
+                }
+                ''')
+            )
 
 app, rt = fast_app(hdrs=FastHTML_Gallery_Standard_HDRS())
 
@@ -282,7 +289,9 @@ def home(session):
     status_color = "green" if state.system_status == "ready" else "red"
     if 'session_id' not in session: session['session_id'] = str(uuid.uuid4())
     inp = Input(id="new-question", name="question", placeholder="Enter a question")
-    question_div = Form(Group(inp, Button("Search")), hx_post="/respond", target_id='result', hx_swap="afterbegin")
+    question_div = Form(Group(inp, Button("Search",
+                                          hx_post="/respond", hx_target="#progress_bar, #result", hx_swap="afterbegin", onclick="showProgressMessage()"
+                                          )), )
     # response_div = Div(id='result')
     hiding_content = Div(mk_button(False), Div(id="readme"))
     return Title("EI-Hub RAG"), Main(
@@ -317,7 +326,7 @@ def home(session):
         
         
         # response_div,
-        
+        Div(id="progress_bar"),
         Div(id="result"),
         cls="container"
     )
@@ -358,7 +367,9 @@ async def handle_question(question: str, session):
             P(f"Session ID: {session['session_id']}"), cls='container'
         )
 
-        return answer
+        prog_update = Div()
+
+        return answer, prog_update
         
     
         
