@@ -1,9 +1,11 @@
 .env
-*.txt
+questions.txt
 *.pyc
+.sesskey
 
 archive/
 chroma_db/
 .venv/
 documents/
 temp_documents/
+__pycache__
