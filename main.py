@@ -148,7 +148,7 @@ def extract_sections(response):
     """
     sections = {
         'answer': '',
-        'sources': '',
+        # 'sources': '',
         'confidence': '',
         'assumptions': ''
     }
@@ -163,8 +163,8 @@ def extract_sections(response):
 
         # Extract Sources (everything between "Sources:" and "Confidence:")
         confidence_start = answer_raw.find('Confidence:')
-        if sources_start != -1 and confidence_start != -1:
-            sections['sources'] = answer_raw[sources_start + len('Sources:'):confidence_start].strip()
+        # if sources_start != -1 and confidence_start != -1:
+        #     sections['sources'] = answer_raw[sources_start + len('Sources:'):confidence_start].strip()
 
         # Extract Confidence (everything between "Confidence:" and "Assumptions (if any):")
         assumptions_start = answer_raw.find('Assumptions (if any):')
@@ -184,9 +184,9 @@ def extract_sections(response):
             Td(f"\n{section.upper()}:"), Td(content)
         ))
 
-    rows.append(Tr(
-            Td(f"CONFIDENCE SCORE:"), Td(f"{conf_raw*100}%")
-        ))
+    # rows.append(Tr(
+    #         Td(f"CONFIDENCE SCORE:"), Td(f"{conf_raw*100}%")
+    #     ))
     
     table = Table(Thead(
         Tr(H2("AI Search Results") )),
@@ -297,6 +297,9 @@ def home(session):
     return Title("EI-Hub RAG"), Titled(
         H1("EI-Hub Retrieval-Augmented Generation Search"),
         H3("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
+        P('Help make this AI search even smarter! If you have useful documents to add, please send them to ', 
+          A('glint-discos.0w@icloud.com', href="mailto:glint-discos.0w@icloud.com", target="_blank"),  
+           style="text-indent: 20px; padding: 10px; margin: 0; font-weight: bold; font-size: 1.1em; color: #333; background-color: #f9f9f9; border-left: 5px solid #4CAF50; border-radius: 5px; box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);" ),
         P('Note: This AI search bot is an ', 
           A('independent project', href="https://github.com/3rdworldjuander/EIHub-RAG", target="_blank"), 
             ' and is not officially affiliated with or endorsed by PCG or EI-Hub. For official support, please use authorized support channels.', 
@@ -313,8 +316,8 @@ def home(session):
             A('here', href="https://github.com/3rdworldjuander/EIHub-RAG/tree/main/documents", target="_blank"), 
             style="text-indent: 20px; font-size: 0.8em; padding: 2px; margin: 0;"),
         Br(),
-        hiding_content,
-        Br(),
+        # hiding_content,
+        # Br(),
         question_div,
         Br(), 
         Div(id="progress_bar"),
@@ -338,37 +341,37 @@ async def handle_question(question: str, session):
         if not state.qa_system or state.system_status != "ready":
             return {"error": f"System not ready. Status: {state.system_status}. {state.error_message}"}
 
-        # ### PRODUCTION ###
+        ### PRODUCTION ###
 
-        # # Process question asynchronously
-        # response = await state.process_question(question)
+        # Process question asynchronously
+        response = await state.process_question(question)
 
-        # # Create Response htmls
+        # Create Response htmls
 
-        # is_inf_raw = response['is_inference']
+        is_inf_raw = response['is_inference']
 
-        # # Create Sources table
-        # answer_html = extract_sections(response)
-        # source_html = generate_html(response['sources'])
+        # Create Sources table
+        answer_html = extract_sections(response)
+        source_html = generate_html(response['sources'])
 
-        # answer = Main(
-        #     answer_html,
+        answer = Main(
+            answer_html,
 
-        #     source_html,
+            source_html,
              
-        #     P(f"Session ID: {session['session_id']}"), cls='container'
-        # )
+            P(f"Session ID: {session['session_id']}"), cls='container'
+        )
 
-        # prog_update = Div()
+        prog_update = Div()
 
-        # ### /PRODUCTION ###
+        ### /PRODUCTION ###
 
-        ### DUMMY ###
-        await asyncio.sleep(8) 
+        # ### DUMMY ###
+        # await asyncio.sleep(8) 
 
-        answer = "Lorem Ipsum"
-        prog_update = " "
-        ### /DUMMY ###
+        # answer = "Lorem Ipsum"
+        # prog_update = " "
+        # ### /DUMMY ###
 
         return answer, prog_update
         
