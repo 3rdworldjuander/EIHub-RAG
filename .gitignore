@@ -2,6 +2,7 @@
 questions.txt
 *.pyc
 .sesskey
+h*.py
 
 archive/
 chroma_db/
