@@ -3,6 +3,7 @@ questions.txt
 *.pyc
 .sesskey
 h*.py
+*.db
 
 archive/
 chroma_db/
