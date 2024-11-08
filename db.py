@@ -2,8 +2,12 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime
 import psycopg2
+import pytz
 
 load_dotenv()
+
+# Set timezone to Eastern Standard Time (EST)
+est_timezone = pytz.timezone('America/New_York')
 
 def get_db_connection():
     conn = psycopg2.connect(
@@ -34,7 +38,7 @@ def question_to_db(question: str, sess_id: str):
     row = []
 
     try:
-        current_datetime = datetime.now()
+        current_datetime = datetime.now(est_timezone)
         date = current_datetime.strftime('%Y-%m-%d')
         time = current_datetime.strftime('%H:%M:%S')
         row = (question, date, time, sess_id)
