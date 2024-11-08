@@ -261,14 +261,14 @@ def mk_button(show):
 
 #### Website Header Information Formatting functions ###
 
-### Save questions ###
-async def save_question(question: str):
-    """Save question to questions.txt file"""
-    try:
-        with open('questions.txt', 'a', encoding='utf-8') as f:
-            f.write(f"{question}\n")
-    except Exception as e:
-        logger.error(f"Error saving question to file: {str(e)}")
+# ### Save questions ###
+# async def save_question(question: str):
+#     """Save question to questions.txt file"""
+#     try:
+#         with open('questions.txt', 'a', encoding='utf-8') as f:
+#             f.write(f"{question}\n")
+#     except Exception as e:
+#         logger.error(f"Error saving question to file: {str(e)}")
 
 @app.on_event("startup")
 async def startup_event():
@@ -337,10 +337,10 @@ async def handle_question(question: str, session):
     """Handle question submission"""
     try:
         # Save question to file
-        await save_question(question)
+        # await save_question(question)
 
         # Save to DB
-        await question_to_db(question, session['session_id'])
+        question_to_db(question, session['session_id'])
 
         if not state.qa_system or state.system_status != "ready":
             return {"error": f"System not ready. Status: {state.system_status}. {state.error_message}"}

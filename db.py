@@ -21,11 +21,11 @@ def question_to_db(question: str, sess_id: str):
 
     # Create table if it doesn't exist
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS services (
+    CREATE TABLE IF NOT EXISTS q_history (
         id SERIAL PRIMARY KEY,
         question TEXT,
         date DATE,
-        time TIMESTAMP,
+        time TIME,
         session_id TEXT,
         UNIQUE(question, date, time, session_id)
     )
@@ -39,7 +39,7 @@ def question_to_db(question: str, sess_id: str):
         time = current_datetime.strftime('%H:%M:%S')
         row = (question, date, time, sess_id)
         cursor.execute('''
-                INSERT INTO services (question, date, time, session_id)
+                INSERT INTO q_history (question, date, time, session_id)
                 VALUES (%s, %s, %s, %s)
                 ''', row)
         conn.commit()  # Commit each successful insertion
