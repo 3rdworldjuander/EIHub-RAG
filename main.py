@@ -387,7 +387,7 @@ if __name__ == "__main__":
     # Run with multiple workers
     uvicorn.run(
         "main:app", 
-        host='127.0.0.1', 
+        host='0.0.0.0', 
         port=int(os.getenv("PORT", default=5000)), 
         reload=False,
         workers=int(os.getenv("WORKERS", "1"))  # Number of worker processes
