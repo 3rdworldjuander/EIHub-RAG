@@ -19,7 +19,7 @@ def get_db_connection():
     )
     return conn
 
-def question_to_db(question: str, sess_id: str):
+def question_to_db(question: str, answer: str, sess_id: str):
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -31,7 +31,8 @@ def question_to_db(question: str, sess_id: str):
         date DATE,
         time TIME,
         session_id TEXT,
-        UNIQUE(question, date, time, session_id)
+        answer TEXT,
+        UNIQUE(question, date, time, session_id, answer)
     )
     ''')
 
@@ -41,10 +42,10 @@ def question_to_db(question: str, sess_id: str):
         current_datetime = datetime.now(est_timezone)
         date = current_datetime.strftime('%Y-%m-%d')
         time = current_datetime.strftime('%H:%M:%S')
-        row = (question, date, time, sess_id)
+        row = (question, date, time, sess_id, answer)
         cursor.execute('''
-                INSERT INTO q_history (question, date, time, session_id)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO q_history (question, date, time, session_id, answer)
+                VALUES (%s, %s, %s, %s, %s)
                 ''', row)
         conn.commit()  # Commit each successful insertion
     finally:

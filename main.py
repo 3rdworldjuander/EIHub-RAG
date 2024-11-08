@@ -339,8 +339,6 @@ async def handle_question(question: str, session):
         # Save question to file
         # await save_question(question)
 
-        # Save to DB
-        question_to_db(question, session['session_id'])
 
         if not state.qa_system or state.system_status != "ready":
             return {"error": f"System not ready. Status: {state.system_status}. {state.error_message}"}
@@ -349,6 +347,9 @@ async def handle_question(question: str, session):
 
         # Process question asynchronously
         response = await state.process_question(question)
+
+        # Save to DB
+        question_to_db(question, response['answer'], session['session_id'])
 
         # Create Response htmls
 
@@ -387,7 +388,8 @@ if __name__ == "__main__":
     # Run with multiple workers
     uvicorn.run(
         "main:app", 
-        host='0.0.0.0', 
+        # host='0.0.0.0',
+        host='127.0.0.1', 
         port=int(os.getenv("PORT", default=5000)), 
         reload=False,
         workers=int(os.getenv("WORKERS", "1"))  # Number of worker processes
