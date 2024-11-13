@@ -1,4 +1,5 @@
 # EI-Hub Retrieval-Augmented Generation Search Disclaimer
+http://eihubrag.eastus.cloudapp.azure.com:5000
 
 ## Purpose and Usage
 
