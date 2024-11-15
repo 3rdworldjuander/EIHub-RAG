@@ -524,6 +524,8 @@ class EnhancedDocumentQASystem:
 
         Question: {question}
 
+        Note: If the question appears incomplete or lacks context (e.g., single words or vague phrases), suggest how it could be rephrased for better results. Reference the tips section for guidance on effective questions.
+
         Instructions:
         1. Analyze all provided context thoroughly
         2. If you find a direct answer, quote the relevant text and cite the source
