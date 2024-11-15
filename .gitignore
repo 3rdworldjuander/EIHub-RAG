@@ -8,6 +8,5 @@ h*.py
 archive/
 chroma_db/
 .venv/
-documents/
 temp_documents/
 __pycache__
