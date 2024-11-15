@@ -296,10 +296,10 @@ def home(session):
     hiding_content = Div(mk_button(False), Div(id="readme"),style="font-size: 0.8em; margin: 0;")
     return Title("EI-Hub RAG"), Titled(
         H1("EI-Hub Retrieval-Augmented Generation Search"),
-        # H3("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation."),
-        P('Do you find this useful? Help make it even better! This AI is only as smart as the documents it learns from. Send useful documents (in any format) to ', 
-          A('glint-discos.0w@icloud.com', href="mailto:glint-discos.0w@icloud.com", target="_blank"),  
-           style="text-indent: 20px; padding: 10px; margin: 0; font-weight: bold; font-size: 1.1em; color: #333; background-color: #f9f9f9; border-left: 5px solid #4CAF50; border-radius: 5px; box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);" ),
+        H3("This RAG search is designed to assist in searching and retrieving information from EI-Hub and PCG documentation. It is provided as a supplementary tool to help navigate technical documentation more efficiently."),
+        # P('Do you find this useful? Help make it even better! This AI is only as smart as the documents it learns from. Send useful documents (in any format) to ', 
+        #   A('glint-discos.0w@icloud.com', href="mailto:glint-discos.0w@icloud.com", target="_blank"),  
+        #    style="text-indent: 20px; padding: 10px; margin: 0; font-weight: bold; font-size: 1.1em; color: #333; background-color: #f9f9f9; border-left: 5px solid #4CAF50; border-radius: 5px; box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);" ),
         Br(),
         P('Note: This AI search bot is an ', 
           A('independent project', href="https://github.com/3rdworldjuander/EIHub-RAG", target="_blank"), 
