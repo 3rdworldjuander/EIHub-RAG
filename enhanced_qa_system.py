@@ -518,22 +518,50 @@ class EnhancedDocumentQASystem:
             openai_api_key=self.openai_api_key
         )
         
+        # template = """Use the following pieces of context to answer the question. 
+
+        # Context: {context}
+
+        # Question: {question}
+
+        # Note: If the question appears incomplete or lacks context (e.g., single words or vague phrases), suggest how it could be rephrased for better results. Reference the tips section for guidance on effective questions.
+
+        # Instructions:
+        # 1. Analyze all provided context thoroughly
+        # 2. If you find a direct answer, quote the relevant text and cite the source
+        # 3. If you can only find partial information, clearly state what information is available
+        # 4. If you need to make any assumptions or inferences, explicitly state them
+        # 5. Include confidence level and reasoning for your answer
+        # 6. Always cite the specific source documents used
+        
+        # Format your response as follows:
+        # Answer: [Your detailed answer]
+        # Sources: [List of source documents used]
+        # Confidence: [High/Medium/Low] - [Explanation of confidence level]
+        # Assumptions (if any): [List any assumptions or inferences made]
+        
+        # Answer:"""
+
+
+        #Experimental New Prompt Template (16-Nov)
         template = """Use the following pieces of context to answer the question. 
 
         Context: {context}
 
         Question: {question}
 
-        Note: If the question appears incomplete or lacks context (e.g., single words or vague phrases), suggest how it could be rephrased for better results. Reference the tips section for guidance on effective questions.
+        Note: If the question appears incomplete or lacks context (e.g., single words or vague phrases), suggest a more effective rephrased version to get better results.
 
         Instructions:
-        1. Analyze all provided context thoroughly
-        2. If you find a direct answer, quote the relevant text and cite the source
-        3. If you can only find partial information, clearly state what information is available
-        4. If you need to make any assumptions or inferences, explicitly state them
-        5. Include confidence level and reasoning for your answer
-        6. Always cite the specific source documents used
-        
+        - Analyze the provided context thoroughly for relevant information.
+        - Provide a direct answer when possible, quoting and citing sources.
+        - If partial information is found, state clearly what is available.
+        - Make explicit any assumptions or inferences, if needed.
+        - Assess the confidence level of your answer with reasoning.
+        - Combine insights from multiple pieces of context where possible for a comprehensive answer.
+        - Address contradictory information by identifying conflicts and suggesting clarifications.
+        - Evaluate the confidence level of your answer as High, Medium, or Low, with reasoning.
+
         Format your response as follows:
         Answer: [Your detailed answer]
         Sources: [List of source documents used]
